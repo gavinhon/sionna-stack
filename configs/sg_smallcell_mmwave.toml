@@ -1,0 +1,114 @@
+# REALISTIC deployment 2: a street-level mmWave SMALL CELL (lamppost) in Singapore's CBD (Raffles Place).
+#
+# Why these values (typical, not a specific product):
+#   * lamppost at 6 m on the street that crosses the plaza; 2 sectors pointing up and down the street
+#     (compass 5 and 185 deg), 5 deg downtilt
+#   * each sector: 8 x 8 array of 3GPP TR 38.901 elements (8 dBi) -> ~26 dBi beam gain; 30 dBm conducted power
+#     -> ~56 dBm EIRP per beam, typical for 5G mmWave small cells
+#   * beam sweeping: 9 azimuths (-60..+60 deg) x 2 elevations (0, -10 deg) = 18 beams; every location and every
+#     receiver uses its best (sector, beam), like a phone attaching to the strongest SSB beam
+#   * 28 GHz and 39 GHz (5G FR2; 400 MHz channels) and 140 GHz (6G sub-THz candidate; 2 GHz channel) with the
+#     same array (at 140 GHz a real array would have more elements; kept identical for comparability)
+# Receivers: phones at 1.5 m (isotropic, 7 dB noise figure), chosen with scripts/suggest_layout.py.
+
+[experiment]
+name = "sg_smallcell_mmwave"
+description = "Singapore Raffles Place, 6 m lamppost mmWave small cell, 8x8 array, 18-beam sweep, 28/39/140 GHz"
+
+[scene]
+source = "../scenes/sg_raffles_place/scene.xml"
+
+[bands]
+ghz = [28.0, 39.0, 140.0]
+bandwidth_mhz = [400, 400, 2000]
+noise_figure_db = 7.0
+extrapolate_materials = true   # 140 GHz is above the ITU-R P.2040 range of metal (flagged)
+
+[antennas]
+tx_pattern = "tr38901"
+tx_rows = 8
+tx_cols = 8
+tx_vertical_spacing = 0.5
+tx_horizontal_spacing = 0.5
+rx_pattern = "iso"
+polarization = "V"
+beams = [[-60.0, 0.0], [-45.0, 0.0], [-30.0, 0.0], [-15.0, 0.0], [0.0, 0.0], [15.0, 0.0], [30.0, 0.0], [45.0, 0.0], [60.0, 0.0],
+         [-60.0, -10.0], [-45.0, -10.0], [-30.0, -10.0], [-15.0, -10.0], [0.0, -10.0], [15.0, -10.0], [30.0, -10.0], [45.0, -10.0], [60.0, -10.0]]
+
+[[transmitters]]
+name = "north"
+position = [12.0, -35.0, 6.0]
+power_dbm = 30.0
+azimuth_deg = 5.0
+downtilt_deg = 5.0
+
+[[transmitters]]
+name = "south"
+position = [12.0, -35.0, 6.0]
+power_dbm = 30.0
+azimuth_deg = 185.0
+downtilt_deg = 5.0
+
+# Receivers (phones at 1.5 m), chosen with:
+#   uv run scripts/suggest_layout.py scenes/sg_raffles_place/scene.xml --tx 12 -35 6
+# Note: rx_los lies due west, i.e. 90 deg off both panels (which point along the street): it is served from the
+# side of a beam, a realistic mmWave situation.
+[[receivers]]
+name = "rx_los"
+position = [-78.0, -35.0, 1.5]
+expect = "LOS"          # 90 m
+
+[[receivers]]
+name = "rx_nlos"
+position = [-73.0, -65.0, 1.5]
+expect = "NLOS"         # 90 m
+
+[[receivers]]
+name = "rx_nlos_far"
+position = [12.0, -195.0, 1.5]
+expect = "NLOS"         # 160 m
+
+[paths]
+# Link paths (lines, path counts, delay spread): specular + refraction + diffraction, WITHOUT diffuse scattering.
+# With diffuse on, PathSolver returns one "path" per scattered ray (10^5 per receiver) and its total drifts with
+# the ray count; the signal level at each receiver is therefore taken from the converged radio map instead
+# (see docs: "Accuracy settings").
+max_depth = 10
+samples_per_src = 3_000_000
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = false
+deterministic = true
+seed = 42
+
+[radio_map]
+center = [0.0, 0.0, 1.5]
+size = [500.0, 500.0]
+cell_size = [2.0, 2.0]
+samples_per_tx = 1_000_000_000
+max_depth = 10
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = true
+seed = 42
+display_metric = "rx_power"
+vmin_db = -120.0
+vmax_db = -40.0
+coverage_threshold_db = -130.0
+
+[render]
+camera_position = [-300.0, -520.0, 650.0]
+camera_look_at = [0.0, 0.0, 0.0]
+resolution = [1200, 900]
+num_samples = 64
+paths_camera_position = [-150.0, -250.0, 250.0]
+paths_camera_look_at = [10.0, -35.0, 0.0]
+
+# 3-D signal volume (coverage shells + height slider in the viewer); 18 beams x 2 sectors per band
+[volume]
+height_start = 1.5
+height_step = 5.0
+height_stop = 150.0
+cell_size = 4.0
+samples_per_tx = 300_000_000
+shell_levels = [-100.0, -85.0, -70.0]    # received power [dBm]

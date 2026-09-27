@@ -1,0 +1,116 @@
+# REALISTIC deployment 1: a 3-sector rooftop MACRO site in Singapore's CBD (Raffles Place), low + mid bands.
+#
+# Why these values (typical, not a specific operator's site):
+#   * rooftop of a 43 m mid-rise building + 4 m mast -> antennas at 47 m (macro sites in dense CBDs sit on
+#     mid-rise roofs, not on 250 m towers)
+#   * 3 sectors at compass bearings 0/120/240 deg, 10 deg downtilt (area of interest within ~250 m)
+#   * each sector: vertical panel of 4 x 3GPP TR 38.901 elements (8 dBi, 65 deg beamwidth) -> ~14 dBi
+#   * 46 dBm (40 W) per sector and band, into the panel
+#   * one array definition for all bands (a Sionna constraint: in reality the panel size and the 3.5 GHz
+#     massive-MIMO beamforming differ per band; this is a fixed broad sector beam everywhere)
+# Receivers: phones at 1.5 m (isotropic, 7 dB noise figure), chosen with scripts/suggest_layout.py.
+
+[experiment]
+name = "sg_macro"
+description = "Singapore Raffles Place, 3-sector rooftop macro (47 m, 46 dBm/sector), 700 MHz - 7.5 GHz"
+
+[scene]
+source = "../scenes/sg_raffles_place/scene.xml"
+
+[bands]
+ghz = [0.7, 0.9, 1.8, 2.1, 2.6, 3.5, 7.5]
+bandwidth_mhz = [10, 10, 20, 20, 20, 100, 200]
+noise_figure_db = 7.0
+extrapolate_materials = true   # 700/900 MHz below ITU-R P.2040 range of concrete, marble, metal (flagged)
+
+[antennas]
+tx_pattern = "tr38901"
+tx_rows = 4
+tx_cols = 1
+tx_vertical_spacing = 0.5
+rx_pattern = "iso"
+polarization = "V"
+
+[[transmitters]]
+name = "sector_0"
+position = [-32.0, -50.0, 47.0]
+power_dbm = 46.0
+azimuth_deg = 0.0
+downtilt_deg = 10.0
+
+[[transmitters]]
+name = "sector_120"
+position = [-32.0, -50.0, 47.0]
+power_dbm = 46.0
+azimuth_deg = 120.0
+downtilt_deg = 10.0
+
+[[transmitters]]
+name = "sector_240"
+position = [-32.0, -50.0, 47.0]
+power_dbm = 46.0
+azimuth_deg = 240.0
+downtilt_deg = 10.0
+
+# Receivers (phones at 1.5 m), chosen with:
+#   uv run scripts/suggest_layout.py scenes/sg_raffles_place/scene.xml --tx -32 -50 47
+[[receivers]]
+name = "rx_los"
+position = [-12.0, 30.0, 1.5]
+expect = "LOS"          # 94 m
+
+[[receivers]]
+name = "rx_nlos"
+position = [-107.0, -30.0, 1.5]
+expect = "NLOS"         # 90 m
+
+[[receivers]]
+name = "rx_nlos_far"
+position = [-82.0, -195.0, 1.5]
+expect = "NLOS"         # 160 m
+
+[paths]
+# Link paths (lines, path counts, delay spread): specular + refraction + diffraction, WITHOUT diffuse scattering.
+# With diffuse on, PathSolver returns one "path" per scattered ray (10^5 per receiver) and its total drifts with
+# the ray count; the signal level at each receiver is therefore taken from the converged radio map instead
+# (see docs: "Accuracy settings").
+max_depth = 10
+samples_per_src = 3_000_000
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = false
+deterministic = true
+seed = 42
+
+[radio_map]
+center = [0.0, 0.0, 1.5]
+size = [500.0, 500.0]
+cell_size = [2.0, 2.0]
+samples_per_tx = 1_000_000_000   # converged (scripts/convergence_study.py): median < 0.3 dB vs 3e9 rays
+max_depth = 10                   # converged: < 0.35 dB p90 vs depth 12
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = true
+seed = 42
+display_metric = "rx_power"
+vmin_db = -110.0
+vmax_db = -20.0
+coverage_threshold_db = -130.0
+
+[render]
+camera_position = [-300.0, -520.0, 650.0]
+camera_look_at = [0.0, 0.0, 0.0]
+resolution = [1200, 900]
+num_samples = 64
+paths_camera_position = [-200.0, -330.0, 330.0]
+paths_camera_look_at = [-30.0, -50.0, 0.0]
+
+# 3-D signal volume (coverage shells + height slider in the viewer)
+[volume]
+height_start = 1.5
+height_step = 5.0
+height_stop = 150.0
+cell_size = 4.0
+samples_per_tx = 300_000_000
+shell_levels = [-60.0, -45.0, -30.0]    # received power [dBm]; chosen inside the volume's range (tools/volume_stats.py):
+                                        # the macro is strong almost everywhere, so -80/-100 dBm only traced weak pockets

@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "sionna-viewer",
+      "runtimeExecutable": "wsl",
+      "runtimeArgs": ["-d", "Ubuntu-24.04", "--", "bash", "-l", "/home/gavin/projects/sionna-stack/scripts/viewer.sh"],
+      "port": 5180
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+[project]
+name = "sionna-stack"
+version = "0.1.0"
+description = "Replicable EM/RF propagation simulation stack: Sionna RT (ray tracing) + geo exporter + CesiumJS viewer"
+readme = "README.md"
+# Full `sionna` (PHY/SYS) requires Python >= 3.11; Ubuntu 24.04 ships 3.12.
+requires-python = ">=3.11,<3.13"
+dependencies = [
+    # Full Sionna (RT + PHY/SYS, PyTorch-based). Pulls sionna-rt==2.1.0 and torch>=2.9.1.
+    "sionna==2.1.0",
+    # Explicit pins of the ray-tracing core, matching sionna-rt 2.1.0's own pins.
+    "sionna-rt==2.1.0",
+    "mitsuba==3.9.1",
+    "drjit==1.5.0",
+    "torch>=2.9.1",
+    # Experiment tooling
+    "numpy>=2.2",
+    "matplotlib>=3.10",
+    "pandas>=2.2",
+    "jupyterlab>=4.3",
+    "ipywidgets>=8.1.5",
+    "nbconvert>=7.16",
+    "ipykernel>=6.29",
+    # Phase 2: geospatial scene creation + export
+    "pyproj>=3.7",          # exact local ENU <-> WGS84 conversions (PROJ "topocentric")
+    "shapely>=2.0",         # OSM footprint polygons
+    "trimesh>=4.5",         # extrusion, PLY/GLB export
+    "mapbox-earcut>=1.0",   # polygon triangulation backend used by trimesh
+    "requests>=2.32",       # Overpass API (OpenStreetMap) download
+    "scikit-image>=0.24",   # marching cubes: 3-D coverage shells from the signal volume
+]
+
+[build-system]
+requires = ["hatchling>=1.26"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/sionna_stack"]

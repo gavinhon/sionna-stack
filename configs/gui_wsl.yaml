@@ -1,0 +1,4 @@
+# sionna-rt-gui overrides for WSL2 (LLVM variant): the OptiX denoiser only exists in CUDA mode,
+# but gui.py re-enables it on window resize regardless of the variant, so switch it off here.
+rendering:
+  use_denoiser: false

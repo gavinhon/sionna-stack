@@ -1,0 +1,110 @@
+# REFERENCE experiment for Singapore (Raffles Place): what does the frequency alone do?
+# An idealised omnidirectional transmitter (isotropic antenna, 44 dBm) swept over 10 bands, plus a moving TX.
+# Realistic deployments with real antennas are in sg_macro.toml (rooftop macro) and sg_smallcell_mmwave.toml.
+#
+# Scene (generator v2: building parts + OSM materials), created with:
+#   uv run scripts/make_osm_scene.py --name sg_raffles_place --lat 1.2840 --lon 103.8514 --size 600
+# Local frame: East-North-Up metres around the origin in scenes/sg_raffles_place/scene_meta.json.
+
+[experiment]
+name = "sg_raffles_place"
+description = "Singapore Raffles Place, idealised omni TX: 700 MHz to 140 GHz frequency sweep + TX moving along a street"
+
+[scene]
+source = "../scenes/sg_raffles_place/scene.xml"
+
+[bands]
+# Bands used in Singapore (IMDA: 700/900/1800 MHz, 2.1, 2.5-2.6, 3.5 GHz, mmWave 26-28 GHz, 39 GHz trials)
+# plus 6G candidates (7-8 GHz "FR3", 140 GHz sub-THz).
+ghz = [0.7, 0.9, 1.8, 2.1, 2.6, 3.5, 7.5, 28.0, 39.0, 140.0]
+# Typical channel bandwidth per band [MHz] (for SNR and the capacity bound)
+bandwidth_mhz = [10, 10, 20, 20, 20, 100, 200, 400, 400, 2000]
+noise_figure_db = 7.0
+# 700/900 MHz are below the ITU-R P.2040 range of concrete, marble and metal (>= 1 GHz); 140 GHz is above the
+# metal range. The ITU power laws are extrapolated there and every run lists them in its warnings.
+extrapolate_materials = true
+
+[antennas]
+tx_pattern = "iso"
+rx_pattern = "iso"
+polarization = "V"
+
+# Small cell at 12 m in the Raffles Place plaza (open ground, towers of 150-285 m around it).
+[[transmitters]]
+name = "tx"
+position = [20.0, 0.0, 12.0]
+power_dbm = 44.0
+
+# Chosen with: uv run scripts/suggest_layout.py scenes/sg_raffles_place/scene.xml --tx 20 0 12  (v2 scene)
+[[receivers]]
+name = "rx_los"
+position = [-20.0, -80.0, 1.5]
+expect = "LOS"          # 90 m
+
+[[receivers]]
+name = "rx_nlos"
+position = [-60.0, -40.0, 1.5]
+expect = "NLOS"         # 90 m
+
+[[receivers]]
+name = "rx_nlos_far"
+position = [75.0, -150.0, 1.5]
+expect = "NLOS"         # 160 m (re-selected on the v2 scene: the old spot (-35, -150) has line of sight once
+                        # the building there is modelled from its OSM parts)
+
+[paths]
+# Link paths (lines, path counts, delay spread): specular + refraction + diffraction, WITHOUT diffuse scattering.
+# With diffuse on, PathSolver returns one "path" per scattered ray (10^5 per receiver) and its total drifts with
+# the ray count; the signal level at each receiver is therefore taken from the converged radio map instead
+# (see docs: "Accuracy settings").
+max_depth = 10
+samples_per_src = 3_000_000
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = false
+deterministic = true
+seed = 42
+
+[radio_map]
+center = [0.0, 0.0, 1.5]
+size = [500.0, 500.0]
+cell_size = [2.0, 2.0]
+samples_per_tx = 1_000_000_000   # converged (scripts/convergence_study.py): median < 0.3 dB vs 3e9 rays
+max_depth = 10                   # converged: < 0.35 dB p90 vs depth 12
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = true
+seed = 42
+display_metric = "path_gain"
+vmin_db = -150.0
+vmax_db = -60.0
+coverage_threshold_db = -130.0
+
+[render]
+camera_position = [-300.0, -520.0, 650.0]
+camera_look_at = [0.0, 0.0, 0.0]
+resolution = [1200, 900]
+num_samples = 128
+paths_camera_position = [-170.0, -330.0, 330.0]
+paths_camera_look_at = [-20.0, -60.0, 0.0]
+
+# Moving transmitter: the same small cell on a vehicle (3 m) driving 300 m along the straight street through
+# the plaza (route checked with suggest_layout.py --route: outdoors all the way).
+[mobility]
+tx = "tx"
+waypoints = [[-23.0, -148.6, 3.0], [3.1, 150.3, 3.0]]
+num_steps = 60
+speed_mps = 10.0
+cell_size = [4.0, 4.0]
+samples_per_tx = 200_000_000   # 4 m cells: ~ the rays per cell of 8e8 at 2 m (60 snapshots x 10 bands)
+samples_per_src = 1_000_000
+
+# 3-D signal volume (coverage shells + height slider in the viewer): 1.5 m and every 5 m up to 150 m,
+# 4 m cells, computed on a stacked measurement mesh (see src/sionna_stack/volume.py).
+[volume]
+height_start = 1.5
+height_step = 5.0
+height_stop = 150.0
+cell_size = 4.0
+samples_per_tx = 300_000_000
+shell_levels = [-100.0, -90.0, -80.0]    # path gain [dB]: outer shell = weaker edge, inner = strong core

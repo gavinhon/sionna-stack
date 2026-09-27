@@ -1,0 +1,72 @@
+# Frequency-band experiment on Sionna's built-in Munich scene.
+# Same scene, same transmitter (position + power), same receivers; only scene.frequency changes.
+# All coordinates are the scene's local Cartesian frame in metres (x east-ish, y north-ish, z up).
+# NOTE: built-in scenes carry no geographic reference, so they cannot be placed on a globe
+# (see README, "Why built-in scenes can't be georeferenced").
+
+[experiment]
+name = "munich_frequency"
+description = "3.5 GHz vs 28 GHz on the built-in Munich scene: coverage, paths, delay spread"
+
+[scene]
+source = "builtin:munich"   # or a path to a Mitsuba XML scene, relative to this file
+
+[bands]
+ghz = [3.5, 28.0]
+# 0.7 GHz is outside ITU-R P.2040 validity for marble/concrete/brick/metal (1-100 GHz).
+# Set to true to extrapolate the ITU power law (results are flagged in manifest.json).
+extrapolate_materials = false
+
+[antennas]
+tx_pattern = "iso"          # isotropic => path gain is the pure propagation gain
+rx_pattern = "iso"
+polarization = "V"
+
+[[transmitters]]
+name = "tx"
+position = [8.5, 21.0, 27.0]  # rooftop-height site from the Sionna RT introduction tutorial
+power_dbm = 44.0
+
+# Receivers at 1.5 m (handset height). LOS/NLOS picked with visibility ray tests; the run reports
+# the measured LOS flag from the computed paths.
+[[receivers]]
+name = "rx_los"
+position = [0.0, 100.0, 1.5]
+expect = "LOS"
+
+[[receivers]]
+name = "rx_nlos"
+position = [-90.0, 20.0, 1.5]
+expect = "NLOS"
+
+[[receivers]]
+name = "rx_nlos_far"
+position = [-160.0, 40.0, 1.5]
+expect = "NLOS"
+
+[paths]
+max_depth = 5
+samples_per_src = 1_000_000
+diffraction = true          # frequency-dependent: the key mechanism behind buildings
+deterministic = true        # PathSolver(deterministic=True): reproducible path sets
+seed = 42
+
+[radio_map]
+center = [0.0, 0.0, 1.5]    # horizontal plane at receiver height
+size = [500.0, 500.0]
+cell_size = [2.0, 2.0]
+samples_per_tx = 10_000_000
+max_depth = 5
+diffraction = true
+seed = 42
+vmin_db = -150.0            # shared colour scale for all bands
+vmax_db = -60.0
+coverage_threshold_db = -130.0  # ~ -86 dBm RX power at 44 dBm TX with isotropic antennas
+
+[render]
+camera_position = [0.0, -420.0, 480.0]
+camera_look_at = [0.0, 0.0, 0.0]
+resolution = [1200, 900]
+num_samples = 128
+paths_camera_position = [-50.0, -200.0, 380.0]
+paths_camera_look_at = [-60.0, 50.0, 0.0]

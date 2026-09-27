@@ -1,0 +1,109 @@
+{
+  "name": "sg_raffles_place_specular",
+  "generator": "scripts/make_osm_scene.py",
+  "generator_version": 2,
+  "created_utc": "2026-09-27T12:02:11+00:00",
+  "command": "scripts/make_osm_scene.py --name sg_raffles_place_specular --osm-cache scenes/sg_raffles_place --scattering-scale 0",
+  "origin": {
+    "lat": 1.284,
+    "lon": 103.8514,
+    "height": 0.0,
+    "frame": "ENU tangent plane at origin; x=east, y=north, z=up [m]",
+    "height_reference": "WGS84 ellipsoidal height of local z=0"
+  },
+  "size_m": 600.0,
+  "ground_extent_m": 800.0,
+  "volumes": {
+    "outlines": 154,
+    "parts": 120,
+    "outlines_replaced_by_parts": 26
+  },
+  "height_sources": {
+    "height_tag": 247,
+    "levels": 20,
+    "default": 7
+  },
+  "height_stats_m": {
+    "min": 3.0,
+    "median": 22.200000000000003,
+    "max": 285.0
+  },
+  "wall_materials": {
+    "concrete": 217,
+    "glass": 23,
+    "marble": 22,
+    "metal": 12
+  },
+  "roof_materials": {
+    "concrete": 229,
+    "glass": 29,
+    "marble": 6,
+    "metal": 9,
+    "brick": 1
+  },
+  "material_sources": {
+    "from_osm_tag": 85,
+    "default": 189,
+    "default_material": "concrete"
+  },
+  "material_props": {
+    "brick": {
+      "itu": "brick",
+      "thickness_m": 0.2,
+      "scattering_coefficient": 0.0
+    },
+    "concrete": {
+      "itu": "concrete",
+      "thickness_m": 0.3,
+      "scattering_coefficient": 0.0
+    },
+    "glass": {
+      "itu": "glass",
+      "thickness_m": 0.024,
+      "scattering_coefficient": 0.0
+    },
+    "marble": {
+      "itu": "marble",
+      "thickness_m": 0.3,
+      "scattering_coefficient": 0.0
+    },
+    "metal": {
+      "itu": "metal",
+      "thickness_m": 0.005,
+      "scattering_coefficient": 0.0
+    }
+  },
+  "ground": {
+    "itu": "concrete",
+    "thickness_m": 1.0,
+    "scattering_coefficient": 0.0
+  },
+  "scattering_scale": 0.0,
+  "level_height_m": 3.2,
+  "default_height_m": 12.0,
+  "osm": {
+    "endpoint": "https://overpass-api.de/api/interpreter",
+    "fetched_utc": "2026-09-27T08:53:51+00:00",
+    "osm_base": "2026-09-27T08:51:51Z",
+    "query": "[out:json][timeout:120];(way[\"building\"](1.2812869037947083,103.84870437898323,1.286713093287222,103.85409562101677);relation[\"building\"][\"type\"=\"multipolygon\"](1.2812869037947083,103.84870437898323,1.286713093287222,103.85409562101677);way[\"building:part\"](1.2812869037947083,103.84870437898323,1.286713093287222,103.85409562101677););out geom;",
+    "licence": "(c) OpenStreetMap contributors, ODbL 1.0"
+  },
+  "files": {
+    "scene": "scene.xml",
+    "meshes": [
+      "meshes/bld_brick.ply",
+      "meshes/bld_concrete.ply",
+      "meshes/bld_glass.ply",
+      "meshes/bld_marble.ply",
+      "meshes/bld_metal.ply",
+      "meshes/ground.ply"
+    ],
+    "osm_raw": "osm_raw.json"
+  },
+  "limitations": [
+    "flat roofs (prisms); roof shapes (skillion, pyramidal, ...) ignored",
+    "flat ground at z=0 (no terrain); water surfaces modelled as ground (concrete)",
+    "untagged materials use the default material",
+    "glass without metallic coatings; no windows/mullions/balconies; no vegetation, vehicles or people"
+  ]
+}
