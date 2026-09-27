@@ -95,7 +95,8 @@ sionna-stack/
 │   ├── metrics.py        link + radio-map metrics (§9)
 │   ├── geo.py            GeoFrame: local ENU <-> WGS84 (§15)
 │   ├── layout.py         receiver selection + route checks (§16)
-│   └── mobility.py       moving-TX snapshots (§17)
+│   ├── mobility.py       moving-TX snapshots (§17)
+│   └── volume.py         3-D signal volume, coverage shells, volume figures (§23)
 ├── configs/
 │   ├── munich_frequency.toml   Phase 1 experiment (annotated)
 │   ├── sg_raffles_place.toml   Singapore reference: omni TX, 10 bands, fixed + moving TX
@@ -103,6 +104,7 @@ sionna-stack/
 │   ├── sg_smallcell_mmwave.toml  Singapore: lamppost mmWave small cell, 8x8 array, 18 beams, 28/39/140 GHz
 │   └── gui_wsl.yaml            sionna-rt-gui override (§14)
 ├── scenes/sg_raffles_place/    generated scene + OSM snapshot (tracked in git: it is an input)
+├── scenes/sg_raffles_place_{glass,specular,rough2}/   variants for the sensitivity study (§22)
 ├── scripts/
 │   ├── make_osm_scene.py  OSM -> Sionna scene (§15, v2: parts + materials §21)
 │   ├── convergence_study.py  rays / depth needed (§21)
@@ -110,6 +112,8 @@ sionna-stack/
 │   ├── suggest_layout.py  receivers / route check for any scene (§16)
 │   ├── run_experiment.py  CLI around experiment.run_experiment (static + mobility)
 │   ├── export_geo.py      run -> viewer/public/data (§18)
+│   ├── run_volume.py      add the 3-D volume to an existing run; --figures-only (§23)
+│   ├── make_gifs.py       viewer recordings -> docs/img/viewer_*.gif (§24)
 │   ├── viewer.sh          CesiumJS viewer on 127.0.0.1:5180 (§19)
 │   ├── jupyter.sh         JupyterLab on 127.0.0.1:8890
 │   └── gui.sh             optional sionna-rt-gui in an isolated uvx env
@@ -117,8 +121,10 @@ sionna-stack/
 │   ├── optix_wsl_userlevel.sh  download/verify/extract Linux driver OptiX files (§6)
 │   ├── install_node.sh         pinned Node.js LTS, user-level (§19)
 │   ├── run_all_singapore.sh    all Singapore studies + exports + sensitivity (§22)
-│   ├── follow_log.sh / wait_for.sh   progress helpers for long runs
-├── viewer/                index.html, src/main.js, src/chart.js, src/style.css, vite.config.js,
+│   ├── run_all_volumes.sh      3-D volumes for the latest runs + re-export (§23)
+│   ├── volume_stats.py         value spread of a volume, to choose shell levels (§23)
+│   └── follow_log.sh, show_log.sh, wait_for.sh   follow / summarise the newest log, wait for a run to end
+├── viewer/                index.html, src/main.js, src/record.js (§24), src/chart.js, src/style.css, vite.config.js,
 │                          package.json, package-lock.json, .env.example (public/data is generated)
 ├── notebooks/frequency_experiment.ipynb   interactive twin of the script (stored WITHOUT outputs)
 ├── docs/                  USER_GUIDE.md, DEVELOPER_GUIDE.md, REBUILD_FROM_ZERO.md, img/
@@ -578,8 +584,32 @@ Input: a run directory with `manifest.json["geo_origin"]` (otherwise it exits wi
   when scripting time: `JulianDate` stores TAI, so build times with
   `JulianDate.addSeconds(clock.startTime, t, new JulianDate())`, not `new JulianDate(day, secondsOfDay + t)`
   (that is off by the 37 leap seconds).
+* **3-D coverage and recording mode:** shells and the height layer are described in §23, the `?record=` mode and
+  the `captureSinkPlugin` in §24.
 * **Updating CesiumJS:** change the version in `package.json`, `npm install`, run `npm run dev`, check the console
   and the static-asset curl above, commit `package-lock.json`.
+
+## 20. Phase 2 verification checklist
+
+```bash
+uv run scripts/make_osm_scene.py --name sg_raffles_place --from-cache
+```
+Must print `… 154 outlines + 120 parts (26 outlines replaced by parts), heights 3-285 m; …`, and the meshes must be
+unchanged: compare `sha256sum scenes/sg_raffles_place/meshes/*.ply` before and after (or `git status` once the
+project is committed).
+
+```bash
+uv run scripts/run_experiment.py configs/sg_raffles_place.toml
+```
+Static table as in README §14; mobility lines `60 snapshots`; Doppler max 116.7 / 934.0 Hz in
+`mobility_metrics.csv`.
+
+```bash
+uv run scripts/export_geo.py outputs/sg_raffles_place/latest
+```
+`Exported … (≈55 MB, most of it the 3-D volume)`. Then `./scripts/viewer.sh` and in the browser: Top view with buildings hidden → coverage
+follows OSM streets; buildings on footprints; Moving TX → play; `?base=offline` → only localhost requests in the
+browser's network tab.
 
 ## 21. Accuracy settings (why 1e9 rays, depth 10, and no diffuse link paths)
 
@@ -662,9 +692,10 @@ properties, so gradient-based calibration is possible).
 * Radio-map statistics are over **outdoor** cells (`layout.outdoor_mask` on the cell centres) — a 1.5 m plane cuts
   through building interiors, which previously counted as "not covered".
 * `band_label(0.7)` → "700 MHz"; `band_slug(0.7)` → "0p7GHz".
-* `tools/run_all_singapore.sh` (all three experiments + exports + sensitivity, log in `logs/`),
-  `tools/follow_log.sh` (progress), `tools/wait_for.sh` (wait for a process by pattern; the pattern is written as
-  `[r]un…` so it never matches itself).
+* `tools/run_all_singapore.sh` (all three experiments + exports + sensitivity, log in `logs/`) and
+  `tools/run_all_volumes.sh` (§23). `tools/follow_log.sh` follows the newest log (steps, timings and errors
+  only), `tools/show_log.sh [name-pattern]` prints the same lines once, and `tools/wait_for.sh "<pattern>"` waits
+  until no process matches (it ignores its own parent shells, whose command lines contain the pattern too).
 * `export_geo.py --vmin/--vmax` re-colours a run without re-simulating.
 
 ## 23. 3-D signal volume (coverage shells, height slider)
@@ -752,23 +783,3 @@ changes each frame). GitHub renders GIFs inline from the repository. Every regen
 the git history, so regenerate them only when the results change meaningfully. `--frames-step 2` (half the
 frames, same duration) or `--scale 0.8` make them smaller. Map tiles are © OpenStreetMap contributors (credit
 drawn into every frame).
-
-## 20. Phase 2 verification checklist
-
-```bash
-uv run scripts/make_osm_scene.py --name sg_raffles_place --from-cache
-```
-Must print `180 buildings, heights 3-280 m`; meshes identical to the committed ones (`git status` clean).
-
-```bash
-uv run scripts/run_experiment.py configs/sg_raffles_place.toml
-```
-Static table as in README §14; mobility lines `60 snapshots`; Doppler max 116.7 / 934.0 Hz in
-`mobility_metrics.csv`.
-
-```bash
-uv run scripts/export_geo.py outputs/sg_raffles_place/latest
-```
-`Exported … (≈3.5 MB)`. Then `./scripts/viewer.sh` and in the browser: Top view with buildings hidden → coverage
-follows OSM streets; buildings on footprints; Moving TX → play; `?base=offline` → only localhost requests in the
-browser's network tab.

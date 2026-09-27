@@ -1,0 +1,6 @@
+# Keep Unix line endings everywhere: the scripts run in Ubuntu (WSL), and bash fails on CRLF ("$'\r': command
+# not found"). Without this, Git for Windows (core.autocrlf=true) would check files out with CRLF.
+* text=auto eol=lf
+*.png binary
+*.gif binary
+*.ply binary

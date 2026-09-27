@@ -290,7 +290,7 @@ uv run scripts/run_experiment.py configs/munich_frequency.toml
 ```
 
 About 20 seconds. It prints a table and saves everything into a new folder named with the date and time, for
-example `outputs/munich_frequency/20260927-162439/`. Each run gets its own folder, so old results are never
+example `outputs/munich_frequency/20260927-164221/`. Each run gets its own folder, so old results are never
 overwritten.
 
 ### 5.4 `./scripts/jupyter.sh`: "Explore interactively"
@@ -561,7 +561,7 @@ snapshot, and repeat, like the frames of a film.
 
 **The test:** the same small cell is mounted on a vehicle (3 m high) and drives **300 m along the straight
 street through Raffles Place at 10 m/s (36 km/h)**. That takes 30 seconds, and we compute **60 snapshots**
-(every half second, every 5 m), for both bands. The three receivers stay where they are.
+(every half second, every 5 m), for all 10 bands. The three receivers stay where they are.
 
 At each snapshot we record the paths to each receiver, a full radio map, and the **Doppler shift**: the tiny
 change in frequency caused by movement (the same effect that makes a passing ambulance siren sound higher, then

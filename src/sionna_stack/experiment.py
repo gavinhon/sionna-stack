@@ -176,7 +176,7 @@ def serving_paths(p: dict, weights: list[np.ndarray], tx_power_dbm: list[float])
     """
     a = p["a"]                       # [rx, 1, tx, tx_ant, P, 1]
     valid = p["valid"].astype(bool)  # [rx, tx, P]
-    n_rx, n_tx = a.shape[0], a.shape[2]
+    n_rx = a.shape[0]
     best = np.full((n_rx,), -np.inf)
     s_tx = np.zeros(n_rx, int)
     s_b = np.zeros(n_rx, int)

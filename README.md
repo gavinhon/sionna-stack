@@ -100,7 +100,7 @@ The same architecture in detail (Mermaid source, rendered by GitHub and VS Code 
 flowchart TB
   subgraph WIN["Windows 11 host"]
     DRV["NVIDIA driver 591.86 (CUDA 13.1)<br/>+ WSL GPU paravirtualisation (dxcore)"]
-    BROWSER["Browser (Jupyter 8890, viewer 5180)"]
+    BROWSER["Windows browser<br/>(two independent tabs: JupyterLab and the viewer)"]
   end
   subgraph WSL["WSL2 (kernel 6.6) - distro Ubuntu-24.04 (user gavin, isolated from AODT's Ubuntu-22.04)"]
     LIBCUDA["/usr/lib/wsl/lib/libcuda.so (Windows driver's Linux side, build 590.57)"]
@@ -114,7 +114,8 @@ flowchart TB
       STACK["sionna_stack (backend, config, experiment, metrics)"]
     end
     OSM["scripts/make_osm_scene.py<br/>(OpenStreetMap -> Mitsuba XML + PLY + scene_meta.json)"]
-    SCRIPTS["verify.py, scripts/run_experiment.py,<br/>notebooks/ (JupyterLab)"]
+    SCRIPTS["verify.py, scripts/run_experiment.py<br/>(command line)"]
+    JUPYTER["JupyterLab + notebooks/<br/>(interactive runs)"]
     OUT["outputs/&lt;experiment&gt;/&lt;run_id&gt;/ (PNG, NPZ, CSV, JSON)"]
     EXP["scripts/export_geo.py<br/>(PNG+bounds, CZML, GeoJSON, GLB)"]
     DATA["viewer/public/data/ (static files)"]
@@ -124,7 +125,10 @@ flowchart TB
   OPTIX --> DRJIT
   LLVM --> DRJIT
   OSM --> SCRIPTS
-  DRJIT --> MI --> SIONNA --> STACK --> SCRIPTS --> OUT --> EXP --> DATA --> VIEW --> BROWSER
+  DRJIT --> MI --> SIONNA --> STACK --> SCRIPTS --> OUT --> EXP --> DATA --> VIEW
+  STACK --> JUPYTER --> OUT
+  VIEW -- "localhost:5180 (reads exported files only)" --> BROWSER
+  JUPYTER -- "localhost:8890" --> BROWSER
   TORCH -. "tensor interop (out_type='torch')" .- SIONNA
 ```
 
@@ -524,17 +528,19 @@ Keep the project on the Linux filesystem (`~/...`), not `/mnt/c`, for I/O speed 
 
 ## 12. Next experiments
 
-* **Materials:** swap building materials (glass façades vs concrete) and watch 28 GHz reflections change; custom
-  `RadioMaterial` with measured permittivity.
-* **Antenna arrays and beams:** `PlanarArray(num_rows=8, num_cols=8, pattern="tr38901")`, precoding vectors in
-  `RadioMapSolver` (beam steering), `synthetic_array=False` for per-element paths.
+Done since the first version: building materials from OSM tags with scattering, `building:part` volumes, 10 bands
+from 700 MHz to 140 GHz, 3GPP antenna patterns with sectors and an 8×8 beam sweep (§17), the 3-D coverage volume
+(§18). Still open:
+
+* **Calibration against measurements:** phone or drive-test measurements (RSRP) at known points; tune the
+  untagged-building material (the largest uncertainty, §17) until simulation and measurement agree.
+* **Interference and SINR:** several sites on the same band, SINR instead of SNR maps, handover between the macro
+  and the small cell.
 * **Bandwidth / CFR:** `paths.cfr(subcarrier_frequencies(...))` for 100 MHz at 3.5 GHz vs 400 MHz at 28 GHz;
   frequency selectivity and coherence bandwidth from the delay spread.
 * **Mobility (extend):** moving receivers (pedestrian/vehicle routes) and a fixed TX; time-varying CIR with
   `num_time_steps`; handover between two small cells; drone TX at rooftop height.
-* **Better Singapore scene:** glass façades for towers above ~60 m, `building:part` volumes, terrain; compare with
-  measurements if available.
-* **More bands:** 6–7 GHz (FR3), 39 GHz; diffuse scattering on (`diffuse_reflection=True`) above 20 GHz.
+* **Scene:** trees and street furniture, terrain for hilly sites, a larger area around the site.
 * **Link level:** feed `paths.cir(out_type="torch")` into Sionna PHY (OFDM, MIMO detection, BLER).
 
 ## 13. Real-world scene and georeferencing
@@ -671,9 +677,12 @@ Opens on `http://localhost:5180`. It's a static web app (no backend): it only re
 Runs inside Ubuntu with the Linux Node 24 from `tools/install_node.sh` (the Windows Node isn't used, because
 serving files from the Linux filesystem to a Windows process is slow and unreliable).
 
-* **Fixed TX tab:** band switcher (3.5 / 28 GHz) with one shared colour legend, radio-map on/off and opacity,
-  ray paths toggled per receiver, TX/RX markers with popups (LOS, paths, path gain, RX power, delay spread),
-  link-metrics table.
+* **Fixed TX tab:** band buttons (every band of the run, up to 10) with one shared colour legend, radio-map on/off
+  and opacity, ray paths toggled per receiver (one colour per receiver), TX/RX markers with popups (LOS, paths,
+  path gain, RX power, SNR), link-metrics table (SNR and Shannon capacity for the realistic runs), building
+  materials key.
+* **3-D coverage** (Fixed TX tab, runs with a volume): coverage shells per level and the signal map floating at a
+  chosen height, 1.5–150 m (§18).
 * **Moving TX tab:** Cesium timeline and play button; the TX moves along its route with a trail, the radio map
   and paths change per snapshot, and a chart shows total path gain vs time for each receiver with a cursor
   (dots = LoS).
