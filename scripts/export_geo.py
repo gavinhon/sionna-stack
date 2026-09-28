@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -97,7 +98,8 @@ def color_rgba(gain_db, vmin, vmax, cmap="viridis", alpha=230):
 
 
 # One colour per receiver, identical to the viewer's receiver swatches and chart lines (viewer/src/chart.js).
-RX_COLORS = ["#4fb3ff", "#ffb14f", "#7ee07e", "#ff6b9a", "#c49bff", "#f5e663"]
+RX_COLORS = ["#4fb3ff", "#ffb14f", "#7ee07e", "#ff6b9a", "#c49bff", "#f5e663",
+             "#46e0d0", "#ff8a5c", "#b8e05a", "#e07bd8", "#9aa7ff", "#ffd1a1"]
 
 
 def path_style(ri: int, gain_db: float, vmin: float, vmax: float) -> tuple[list[int], float]:
@@ -147,7 +149,11 @@ def antenna_text(cfg) -> str:
 
 
 def devices(frame, cfg, metrics_rows, label_fn):
-    """CZML + GeoJSON for TX sites (sectors grouped by position) and RX with per-band metrics."""
+    """CZML + GeoJSON for TX sites and RX with per-band metrics.
+
+    Sectors form one site if they share a position, or if their names are <site>_<number> with the same <site>
+    (e.g. s01_1, s01_2, s01_3 from scripts/suggest_sites.py, mounted at different edges of one roof); the site
+    marker sits at the mean position of its sectors."""
     by_rx = {}
     for r in metrics_rows:
         by_rx.setdefault(r["rx"], []).append(r)
@@ -155,8 +161,11 @@ def devices(frame, cfg, metrics_rows, label_fn):
     features = []
     sites = {}
     for t in cfg["transmitters"]:
-        sites.setdefault(tuple(round(v, 2) for v in t["position"]), []).append(t)
-    for si, (pos, txs) in enumerate(sites.items()):
+        m = re.fullmatch(r"(s\d+)_\d+", t["name"])
+        key = m.group(1) if m else tuple(round(v, 2) for v in t["position"])
+        sites.setdefault(key, []).append(t)
+    for si, (key, txs) in enumerate(sites.items()):
+        pos = [round(float(np.mean([t["position"][k] for t in txs])), 2) for k in range(3)]
         lon, lat, h = frame.to_geodetic(*pos)
         sect = "".join(
             f"<tr><td>{t['name']}</td><td>{t['power_dbm']:g} dBm</td>"
@@ -165,7 +174,8 @@ def devices(frame, cfg, metrics_rows, label_fn):
         desc = (f"<p>Antenna site at {pos[2]:g} m, {len(txs)} sector(s). Antenna: {antenna_text(cfg)}.</p>"
                 "<table><tr><th>sector</th><th>power</th><th>azimuth</th><th>downtilt</th></tr>" + sect + "</table>"
                 f"<p>local ENU [m]: {list(pos)}</p>")
-        name = txs[0]["name"] if len(txs) == 1 else f"site {si + 1} ({len(txs)} sectors)"
+        label = key if isinstance(key, str) else si + 1
+        name = txs[0]["name"] if len(txs) == 1 else f"site {label} ({len(txs)} sectors)"
         # keep the id of single-TX sites as tx/<name> (the viewer hides it in moving-TX mode)
         ident = f"tx/{txs[0]['name']}" if len(txs) == 1 else f"txsite/{si}"
         czml.append({"id": ident, "name": f"TX {name}", "description": desc,
@@ -227,7 +237,7 @@ def buildings_glb(scene_xml: Path, out: Path) -> list[str]:
     scene = trimesh.Scene()
     mats = []
     for p in sorted((scene_xml.parent / "meshes").glob("*.ply")):
-        if p.stem == "ground":
+        if p.stem.startswith("ground"):  # ground.ply and ground_water.ply: the base map shows the ground
             continue
         m = trimesh.load(p, force="mesh")
         if len(m.faces) == 0:
@@ -245,15 +255,17 @@ def buildings_glb(scene_xml: Path, out: Path) -> list[str]:
 
 
 def export_volume(frame, vol: dict, metric: str, vmin: float, vmax: float, levels: list[float], out_dir: Path,
-                  rel: str) -> dict:
+                  rel: str, tx_xy=None) -> dict:
     """3-D volume -> height-layer PNGs (height slider) + one translucent GLB shell per level (coverage shells).
 
-    Shells: iso-surfaces of the displayed quantity (marching cubes) after light smoothing, with cells inside
-    buildings and cells no ray reached treated as 'no signal'. The volume is padded with 'no signal' on the sides
-    and top (so shells close there) but not at the bottom (so shells stand open on the ground, like domes).
+    Shells: iso-surfaces of the displayed quantity (marching cubes, sionna_stack.volume.shell_meshes) after light
+    smoothing; cells no ray reached count as 'no signal', cells inside buildings keep their through-wall values,
+    and shells stay open at the edges of the computed box. Each shell also gets the share of the outdoor air inside
+    it and the typical distance of the stronger / weaker air from the nearest transmitter (volume.shell_stats),
+    which the viewer uses to explain what the surface shows.
     """
     import trimesh
-    from sionna_stack.volume import shell_meshes
+    from sionna_stack.volume import shell_meshes, shell_stats
     out_dir.mkdir(parents=True, exist_ok=True)
     hs, xs, ys = vol["heights"], vol["xs"], vol["ys"]
     raw = vol["rx_power_dbm"] if metric == "rx_power" else db(vol["path_gain"])
@@ -267,6 +279,7 @@ def export_volume(frame, vol: dict, metric: str, vmin: float, vmax: float, level
     # shells (same code as the run's volume_shells_3d.png)
     dx = float(xs[1] - xs[0])
     shells = []
+    stats = {s["level"]: s for s in shell_stats(raw, reached, vol["indoor"], xs, ys, levels, tx_xy)}
     for lev, verts, faces in shell_meshes(raw, reached, hs, xs, ys, levels, vmin - 60.0, step=1):
         x, y, z = verts[:, 0], verts[:, 1], verts[:, 2]
         m = trimesh.Trimesh(vertices=np.column_stack([x, z, -y]), faces=faces[:, ::-1], process=True)  # glTF Y-up
@@ -276,7 +289,15 @@ def export_volume(frame, vol: dict, metric: str, vmin: float, vmax: float, level
             roughnessFactor=1.0))
         name = f"shell_{int(round(lev)):+d}.glb".replace("+", "p").replace("-", "m")
         m.export(out_dir / name)
-        shells.append({"level": lev, "glb": f"{rel}/{name}", "rgba": rgba, "triangles": int(len(m.faces))})
+        shells.append({"level": lev, "glb": f"{rel}/{name}", "rgba": rgba, "triangles": int(len(m.faces)),
+                       **{k: v for k, v in stats[float(lev)].items() if k != "level"}})
+    # levels without any surface (never or everywhere exceeded) still get their numbers, for the explanation
+    have = {s["level"] for s in shells}
+    for lev, s in stats.items():
+        if lev not in have:
+            shells.append({"level": lev, "glb": None, "rgba": color_rgba(lev, vmin, vmax, alpha=255), "triangles": 0,
+                           **{k: v for k, v in s.items() if k != "level"}})
+    shells.sort(key=lambda s: s["level"])
     rect = frame.rectangle_degrees(xs[0] - dx / 2, ys[0] - dx / 2, xs[-1] + dx / 2, ys[-1] + dx / 2)
     return {"heights_m": [float(h) for h in hs], "frames": frames, "rectangle": rect, "shells": shells}
 
@@ -348,7 +369,8 @@ def main() -> int:
             if not f.is_file():
                 continue
             vol = dict(np.load(f))
-            e = export_volume(frame, vol, metric, vmin, vmax, levels, dest / "volume" / slug, f"volume/{slug}")
+            e = export_volume(frame, vol, metric, vmin, vmax, levels, dest / "volume" / slug, f"volume/{slug}",
+                              tx_xy=[t["position"][:2] for t in cfg["transmitters"]])
             vbands.append({"ghz": ghz, "slug": slug, "label": band_label(ghz), **e})
             print(f"  volume {band_label(ghz)}: {len(e['frames'])} height layers, shells "
                   + ", ".join(f"{s['level']:g} ({s['triangles']} tri)" for s in e["shells"]))

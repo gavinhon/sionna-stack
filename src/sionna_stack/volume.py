@@ -68,42 +68,45 @@ def roof_heights(scene, xs, ys) -> np.ndarray:
 def compute_volume(scene, cfg: ExperimentConfig, weights: list[np.ndarray], mesh, xs, ys, hs, roofs) -> dict:
     """Best-server / best-beam signal volume for the current scene.frequency."""
     from sionna.rt import RadioMapSolver
-    from .experiment import _release_gpu_cache
+    from .experiment import MAX_RAYS_PER_CALL, TX_BATCH, _release_gpu_cache, tx_batches
     r, v = cfg.radio_map, cfg.volume
     powers = np.asarray([t.power_dbm for t in cfg.transmitters])
     nz, ny, nx = len(hs), len(ys), len(xs)
     best_pw = None
     idx = None
-    for w in weights:
-        pv = None
-        if len(w) > 1:
-            pv = (mi.TensorXf(w.real.astype(np.float32)), mi.TensorXf(w.imag.astype(np.float32)))
-        rm = RadioMapSolver()(scene, measurement_surface=mesh, samples_per_tx=v.samples_per_tx,
-                              max_depth=r.max_depth, los=r.los, specular_reflection=r.specular_reflection,
-                              diffuse_reflection=r.diffuse_reflection, refraction=r.refraction,
-                              diffraction=r.diffraction, edge_diffraction=r.edge_diffraction, seed=r.seed,
-                              precoding_vec=pv)
-        pg = np.array(rm.path_gain)                                   # [tx, triangles]
-        if idx is None:                                               # triangle -> (z, y, x), once
-            cc = np.array(rm.cell_centers)
-            cc = cc.T if cc.shape[0] == 3 and cc.shape[-1] != 3 else cc
-            iz = np.array([np.argmin(np.abs(hs - z)) for z in np.round(cc[:, 2], 3)])
-            iy = np.clip(np.round((cc[:, 1] - ys[0]) / v.cell_size).astype(int), 0, ny - 1)
-            ix = np.clip(np.round((cc[:, 0] - xs[0]) / v.cell_size).astype(int), 0, nx - 1)
-            idx = (iz, iy, ix)
-        del rm
-        _release_gpu_cache()
-        with np.errstate(divide="ignore"):
-            pw = 10 * np.log10(pg) + powers[:, None]                  # [tx, triangles] dBm
-        k = np.argmax(pw, axis=0)
-        pw_best = np.take_along_axis(pw, k[None], 0)[0]
-        pg_best = np.take_along_axis(pg, k[None], 0)[0]
-        if best_pw is None:
-            best_pw, best_pg = pw_best, pg_best
-        else:
-            better = pw_best > best_pw
-            best_pw = np.where(better, pw_best, best_pw)
-            best_pg = np.where(better, pg_best, best_pg)
+    # many transmitters (wide-area runs): a few per call, <= 2^32 rays per call (see experiment.tx_batches)
+    size = max(1, min(TX_BATCH, MAX_RAYS_PER_CALL // max(1, v.samples_per_tx)))
+    for tx_idx in tx_batches(scene, cfg, size=size):
+        for w in weights:
+            pv = None
+            if len(w) > 1:
+                pv = (mi.TensorXf(w.real.astype(np.float32)), mi.TensorXf(w.imag.astype(np.float32)))
+            rm = RadioMapSolver()(scene, measurement_surface=mesh, samples_per_tx=v.samples_per_tx,
+                                  max_depth=r.max_depth, los=r.los, specular_reflection=r.specular_reflection,
+                                  diffuse_reflection=r.diffuse_reflection, refraction=r.refraction,
+                                  diffraction=r.diffraction, edge_diffraction=r.edge_diffraction, seed=r.seed,
+                                  precoding_vec=pv)
+            pg = np.array(rm.path_gain)                               # [tx in batch, triangles]
+            if idx is None:                                           # triangle -> (z, y, x), once
+                cc = np.array(rm.cell_centers)
+                cc = cc.T if cc.shape[0] == 3 and cc.shape[-1] != 3 else cc
+                iz = np.array([np.argmin(np.abs(hs - z)) for z in np.round(cc[:, 2], 3)])
+                iy = np.clip(np.round((cc[:, 1] - ys[0]) / v.cell_size).astype(int), 0, ny - 1)
+                ix = np.clip(np.round((cc[:, 0] - xs[0]) / v.cell_size).astype(int), 0, nx - 1)
+                idx = (iz, iy, ix)
+            del rm
+            _release_gpu_cache()
+            with np.errstate(divide="ignore"):
+                pw = 10 * np.log10(pg) + powers[tx_idx][:, None]      # [tx in batch, triangles] dBm
+            k = np.argmax(pw, axis=0)
+            pw_best = np.take_along_axis(pw, k[None], 0)[0]
+            pg_best = np.take_along_axis(pg, k[None], 0)[0]
+            if best_pw is None:
+                best_pw, best_pg = pw_best, pg_best
+            else:
+                better = pw_best > best_pw
+                best_pw = np.where(better, pw_best, best_pw)
+                best_pg = np.where(better, pg_best, best_pg)
     # 2 triangles per cell: average in linear power
     vol_pg = np.zeros((nz, ny, nx))
     cnt = np.zeros((nz, ny, nx))
@@ -138,6 +141,7 @@ def run_volumes(scene, cfg: ExperimentConfig, run_dir: Path) -> dict:
         print(f"  volume {band_label(ghz)}: {len(hs)} heights x {len(ys)} x {len(xs)} cells in {timings[band_slug(ghz)]} s")
     slices_figure(cfg, vols, run_dir / "volume_slices.png")
     shells_figure(cfg, vols, run_dir / "volume_shells_3d.png")
+    levels_figure(cfg, vols, run_dir / "volume_shell_levels.png")
     (run_dir / "volume_measurement_mesh.ply").unlink(missing_ok=True)
     return {"bands_ghz": bands, "heights_m": hs.tolist(), "cell_size_m": v.cell_size,
             "samples_per_tx": v.samples_per_tx, "shell_levels": v.shell_levels, "timings_s": timings}
@@ -156,7 +160,97 @@ def redraw_figures(cfg: ExperimentConfig, run_dir: Path) -> dict:
         raise FileNotFoundError(f"no band_*/volume.npz in {run_dir}; run without --figures-only first")
     slices_figure(cfg, vols, run_dir / "volume_slices.png")
     shells_figure(cfg, vols, run_dir / "volume_shells_3d.png")
+    levels_figure(cfg, vols, run_dir / "volume_shell_levels.png")
     return {"bands_ghz": list(vols)}
+
+
+def shell_stats(values: np.ndarray, reached: np.ndarray, indoor: np.ndarray, xs, ys, levels,
+                tx_xy=None) -> list[dict]:
+    """What each coverage shell encloses, for explaining it: per level
+    pct_inside    share [%] of the outdoor air (cells not inside buildings, all heights) at or above the level
+    dist_inside_m / dist_outside_m   median horizontal distance of that stronger / weaker air to the nearest
+                  transmitter (None without transmitters or when empty).
+    A shell is only the boundary between the two. When pct_inside is close to 100 % the surface only wraps the
+    few weaker pockets (usually far from the sites or behind towers) and nothing appears around the transmitters;
+    when it is small the surface is a bubble around the transmitters."""
+    air = ~np.asarray(indoor, bool)
+    v = np.where(reached, values, -np.inf)
+    d = None
+    if tx_xy is not None and len(tx_xy):
+        X, Y = np.meshgrid(np.asarray(xs, float), np.asarray(ys, float))        # [ny, nx]
+        t = np.asarray(tx_xy, float)[:, :2]
+        d2 = np.min(np.hypot(X[None] - t[:, 0, None, None], Y[None] - t[:, 1, None, None]), axis=0)
+        d = np.broadcast_to(d2[None], v.shape)
+    out = []
+    n_air = max(1, int(air.sum()))
+    for lev in sorted(float(x) for x in levels):
+        inside = (v >= lev) & air
+        outside = (v < lev) & air
+        s = {"level": lev, "pct_inside": round(100.0 * inside.sum() / n_air, 1)}
+        if d is not None:
+            s["dist_inside_m"] = round(float(np.median(d[inside]))) if inside.any() else None
+            s["dist_outside_m"] = round(float(np.median(d[outside]))) if outside.any() else None
+        out.append(s)
+    return out
+
+
+def levels_figure(cfg: ExperimentConfig, vols: dict, path: Path) -> None:
+    """The vertical cut with every shell level drawn as a line: shows why a shell sometimes appears only far away
+    from the transmitters (the level is exceeded almost everywhere, so its boundary only wraps weak pockets)."""
+    bands = list(vols)
+    rc = cfg.radio_map
+    wide = (vols[bands[0]]["xs"][-1] - vols[bands[0]]["xs"][0]) > 1000
+    ncols = 1 if wide or len(bands) <= 4 else 2
+    nrows = int(np.ceil(len(bands) / ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(15 if wide else 7.5 * ncols + 1.5, 2.9 * nrows + 0.6),
+                             constrained_layout=True, squeeze=False)
+    axes = axes.ravel()
+    for ax in axes[len(bands):]:
+        ax.axis("off")
+    axes = axes[: len(bands)]
+    ty = cfg.volume.slice_y if cfg.volume.slice_y is not None else cfg.transmitters[0].position[1]
+    near = [t for t in cfg.transmitters if abs(t.position[1] - ty) <= 50]
+    levels = sorted(cfg.volume.shell_levels)
+    colors = ["#ff4d6d", "#ffd166", "#ffffff", "#8ecae6", "#b5e48c"][: len(levels)]
+    tx_xy = [t.position[:2] for t in cfg.transmitters]
+    unit = "dBm" if cfg.radio_map.display_metric == "rx_power" else "dB"
+    im = None
+    for ax, ghz in zip(axes, bands):
+        vol = vols[ghz]
+        vals, label = display_volume(cfg, vol)
+        reached = vol["path_gain"] > 0
+        st = {s["level"]: s for s in shell_stats(vals, reached, vol["indoor"], vol["xs"], vol["ys"], levels, tx_xy)}
+        j = int(np.argmin(np.abs(vol["ys"] - ty)))
+        sl = np.where(reached[:, j, :], vals[:, j, :], rc.vmin_db - 60)
+        cmap = plt.cm.viridis.copy()
+        cmap.set_bad("#d9d9d9")
+        im = ax.pcolormesh(vol["xs"], vol["heights"], np.where(vol["indoor"][:, j, :], np.nan, sl), vmin=rc.vmin_db,
+                           vmax=rc.vmax_db, cmap=cmap, shading="nearest")
+        handles = []
+        from scipy.ndimage import gaussian_filter
+        smooth = gaussian_filter(sl, sigma=(1.0, 1.4))  # same smoothing as the 3-D shells (shell_meshes)
+        for lev, c in zip(levels, colors):
+            cs = ax.contour(vol["xs"], vol["heights"], smooth, levels=[lev], colors=[c], linewidths=1.8,
+                            linestyles="solid")
+            p = st[float(lev)]["pct_inside"]
+            ptxt = "<1" if 0 < p < 0.5 else ">99" if 99.5 <= p < 100 else f"{p:.0f}"
+            handles.append(plt.Line2D([], [], color=c, lw=2,
+                                      label=f"{lev:g} {unit}: {ptxt} % of the air is stronger"))
+            del cs
+        for t in near:
+            ax.plot(t.position[0], t.position[2], "r^", ms=8, mec="white")
+        leg = ax.legend(handles=handles, loc="upper right", fontsize=8, framealpha=0.85, title="shell = this line")
+        leg.get_title().set_fontsize(8)
+        ax.set_title(band_label(ghz), loc="left")
+        ax.set_ylabel("height [m]")
+    for ax in axes[-ncols:]:
+        ax.set_xlabel("x (east) [m]")
+    fig.colorbar(im, ax=list(axes), label=label, shrink=0.8)
+    fig.suptitle(f"{cfg.name}: where each coverage shell runs (vertical cut at y = {ty:g} m, grey = inside buildings)"
+                 f"\nA shell is only the BOUNDARY line. If almost all the air is stronger than its level, the line\n"
+                 f"only circles the weak pockets, far from the transmitters (red triangles).", fontsize=10)
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
 
 
 def shell_meshes(values: np.ndarray, reached: np.ndarray, heights, xs, ys, levels, floor: float,
@@ -230,14 +324,18 @@ def shells_figure(cfg: ExperimentConfig, vols: dict, path: Path) -> None:
         ax.set_xlim(vol["xs"][0], vol["xs"][-1])
         ax.set_ylim(vol["ys"][0], vol["ys"][-1])
         ax.set_zlim(0, vol["heights"][-1])
-        ax.set_box_aspect((1, 1, vol["heights"][-1] / (vol["xs"][-1] - vol["xs"][0])))
+        # true proportions; wide scenes (2 km x 150 m) would be a flat sheet, so height is stretched to >= 1/4
+        ratio = vol["heights"][-1] / (vol["xs"][-1] - vol["xs"][0])
+        stretch = max(1.0, 0.25 / ratio)
+        ax.set_box_aspect((1, 1, ratio * stretch))
         ax.view_init(elev=28, azim=-60)
         ax.set_title(band_label(ghz))
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_zlabel("height [m]")
     unit = "dBm" if cfg.radio_map.display_metric == "rx_power" else "dB"
+    note = f"; height stretched x{stretch:.1f}" if stretch > 1 else ""
     fig.suptitle(f"{cfg.name}: {levels[0]:g} {unit} coverage shell per band\n"
-                 f"(inside the shape the signal is stronger than {levels[0]:g} {unit}; red dot = transmitter)")
+                 f"(inside the shape the signal is stronger than {levels[0]:g} {unit}; red dot = transmitter{note})")
     fig.savefig(path, dpi=110)
     plt.close(fig)
 
@@ -249,13 +347,16 @@ def display_volume(cfg: ExperimentConfig, vol: dict) -> tuple[np.ndarray, str]:
 
 
 def slices_figure(cfg: ExperimentConfig, vols: dict, path: Path) -> None:
-    """Vertical (x-z) cut through the first transmitter for every band: the 3-D pattern in one picture."""
+    """Vertical (x-z) cut for every band ([volume] slice_y, default: through the first transmitter)."""
     bands = list(vols)
     ncols = min(len(bands), 4)
     nrows = int(np.ceil(len(bands) / ncols))
-    fig, axes = plt.subplots(nrows, ncols, figsize=(4.8 * ncols, 2.9 * nrows), constrained_layout=True, squeeze=False)
+    wide = (vols[bands[0]]["xs"][-1] - vols[bands[0]]["xs"][0]) > 1000
+    fig, axes = plt.subplots(nrows, ncols, figsize=((9.5 if wide else 4.8) * ncols, 2.9 * nrows),
+                             constrained_layout=True, squeeze=False)
     axes = axes.ravel()
-    ty = cfg.transmitters[0].position[1]
+    ty = cfg.volume.slice_y if cfg.volume.slice_y is not None else cfg.transmitters[0].position[1]
+    near = [t for t in cfg.transmitters if abs(t.position[1] - ty) <= 50]  # transmitters close to the cut
     rc = cfg.radio_map
     im = None
     for ax, ghz in zip(axes, bands):
@@ -266,7 +367,7 @@ def slices_figure(cfg: ExperimentConfig, vols: dict, path: Path) -> None:
         cmap = plt.cm.viridis.copy()
         cmap.set_bad("#d9d9d9")
         im = ax.pcolormesh(vol["xs"], vol["heights"], sl, vmin=rc.vmin_db, vmax=rc.vmax_db, cmap=cmap, shading="nearest")
-        for t in cfg.transmitters:
+        for t in near:
             ax.plot(t.position[0], t.position[2], "r^", ms=7)
         ax.set_title(band_label(ghz))
         ax.set_xlabel("x (east) [m]")
@@ -275,7 +376,8 @@ def slices_figure(cfg: ExperimentConfig, vols: dict, path: Path) -> None:
         ax.axis("off")
     # the "grey = buildings" note goes in the title: a long colour-bar label is clipped on a single-row figure
     fig.colorbar(im, ax=axes[: len(bands)].tolist(), label=label, shrink=0.8)
-    fig.suptitle(f"{cfg.name}: vertical cut through the transmitter (y = {ty:g} m) - signal vs height, per band "
-                 f"(grey = inside buildings)")
+    where = "through the transmitter" if cfg.volume.slice_y is None else "west-east"
+    fig.suptitle(f"{cfg.name}: vertical cut {where} (y = {ty:g} m) - signal vs height, per band "
+                 f"(grey = inside buildings; red = transmitters within 50 m of the cut)")
     fig.savefig(path, dpi=120)
     plt.close(fig)

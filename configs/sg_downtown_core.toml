@@ -1,0 +1,335 @@
+# WIDE-AREA example: Singapore's Downtown Core, 2 km x 2 km (Boat Quay / Padang -> Marina Bay Sands / Gardens by
+# the Bay), with a realistic macro NETWORK (9 rooftop sites x 3 sectors) and 12 receivers at named places.
+# The small-area studies (sg_raffles_place, sg_macro, sg_smallcell_mmwave) zoom into 600 m around Raffles Place.
+#
+# Scene (generator v2 + water: Marina Bay, the Singapore River and the Kallang Basin are a water surface with the
+# ITU-R P.840 water model; all other ground is concrete), created with:
+#   uv run scripts/make_osm_scene.py --name sg_downtown_core --lat 1.2851 --lon 103.8561 --size 2000
+#
+# Transmitters: a hexagonal macro layout, inter-site distance 500 m (dense urban), each site on the nearest flat
+# roof 25-100 m high (macro antennas sit on mid-rise roofs, not on 250 m tower tops); each sector mounted 3 m
+# above the roof at the roof edge it faces (30/150/270 deg), downtilt towards the cell edge; grid points over the
+# bay get no site. Generated with:
+#   uv run scripts/suggest_sites.py scenes/sg_downtown_core --isd 500
+# Same antenna and power as sg_macro.toml: 4 x 1 panel of 3GPP TR 38.901 elements (~14 dBi), 46 dBm per sector.
+# Every phone is served by the strongest sector (best server); no interference yet (SNR, not SINR).
+#
+# Receivers: phones at 1.5 m at landmarks found by name in OpenStreetMap (Overpass, 2026-09-28), moved to the
+# nearest outdoor point >= 2 m from walls and >= 3 m from the water (one is a water taxi on the bay).
+
+[experiment]
+name = "sg_downtown_core"
+description = "Singapore Downtown Core 2 km x 2 km: 9-site macro network (27 sectors, 46 dBm), 12 landmark receivers, 700 MHz / 1.8 / 3.5 GHz"
+
+[scene]
+source = "../scenes/sg_downtown_core/scene.xml"
+
+[bands]
+ghz = [0.7, 1.8, 3.5]
+bandwidth_mhz = [10, 20, 100]
+noise_figure_db = 7.0
+extrapolate_materials = true   # 700 MHz is below the ITU-R P.2040 range of concrete, marble, metal (flagged)
+
+[antennas]
+tx_pattern = "tr38901"
+tx_rows = 4
+tx_cols = 1
+tx_vertical_spacing = 0.5
+rx_pattern = "iso"
+polarization = "V"
+
+[[transmitters]]
+name = "s01_1"
+position = [-844.1, -878.1, 83.0]   # site 1: roof 80 m, 778 m², centre (-851, -890)
+azimuth_deg = 30.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s01_2"
+position = [-844.5, -902.1, 83.0]
+azimuth_deg = 150.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s01_3"
+position = [-865.0, -890.4, 83.0]
+azimuth_deg = 270.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s02_1"
+position = [-559.4, -385.6, 36.0]   # site 2: roof 33 m, 4622 m², centre (-577, -416)
+azimuth_deg = 30.0
+downtilt_deg = 9.9
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s02_2"
+position = [-559.7, -445.6, 36.0]
+azimuth_deg = 150.0
+downtilt_deg = 9.9
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s02_3"
+position = [-612.9, -415.9, 36.0]
+azimuth_deg = 270.0
+downtilt_deg = 9.9
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s03_1"
+position = [275.2, -325.5, 37.0]   # site 3: roof 34 m, 740 m², centre (273, -329)
+azimuth_deg = 30.0
+downtilt_deg = 10.1
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s03_2"
+position = [281.3, -342.5, 37.0]
+azimuth_deg = 150.0
+downtilt_deg = 10.1
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s03_3"
+position = [264.6, -328.7, 37.0]
+azimuth_deg = 270.0
+downtilt_deg = 10.1
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s04_1"
+position = [-846.3, 79.3, 63.0]   # site 4: roof 60 m, 863 m², centre (-851, 72)
+azimuth_deg = 30.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s04_2"
+position = [-842.2, 56.8, 63.0]
+azimuth_deg = 150.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s04_3"
+position = [-872.5, 71.6, 63.0]
+azimuth_deg = 270.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s05_1"
+position = [-362.7, 11.3, 58.0]   # site 5: roof 55 m, 1057 m², centre (-369, 1)
+azimuth_deg = 30.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s05_2"
+position = [-360.0, -14.2, 58.0]
+azimuth_deg = 150.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s05_3"
+position = [-388.4, 0.9, 58.0]
+azimuth_deg = 270.0
+downtilt_deg = 12.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s06_1"
+position = [454.8, 35.4, 32.0]   # site 6: roof 29 m, 565 m², centre (453, 33)
+azimuth_deg = 30.0
+downtilt_deg = 9.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s06_2"
+position = [456.1, 28.0, 32.0]
+azimuth_deg = 150.0
+downtilt_deg = 9.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s06_3"
+position = [434.7, 32.8, 32.0]
+azimuth_deg = 270.0
+downtilt_deg = 9.0
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s07_1"
+position = [-520.4, 515.4, 29.0]   # site 7: roof 26 m, 290 m², centre (-525, 508)
+azimuth_deg = 30.0
+downtilt_deg = 8.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s07_2"
+position = [-520.5, 501.3, 29.0]
+azimuth_deg = 150.0
+downtilt_deg = 8.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s07_3"
+position = [-532.7, 508.3, 29.0]
+azimuth_deg = 270.0
+downtilt_deg = 8.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s08_1"
+position = [-83.0, 507.2, 38.0]   # site 8: roof 35 m, 5118 m², centre (-103, 473)
+azimuth_deg = 30.0
+downtilt_deg = 10.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s08_2"
+position = [-89.0, 449.0, 38.0]
+azimuth_deg = 150.0
+downtilt_deg = 10.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s08_3"
+position = [-148.0, 472.9, 38.0]
+azimuth_deg = 270.0
+downtilt_deg = 10.3
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s09_1"
+position = [487.9, 583.3, 33.0]   # site 9: roof 30 m, 181 m², centre (484, 577)
+azimuth_deg = 30.0
+downtilt_deg = 9.2
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s09_2"
+position = [486.7, 573.1, 33.0]
+azimuth_deg = 150.0
+downtilt_deg = 9.2
+power_dbm = 46.0
+
+[[transmitters]]
+name = "s09_3"
+position = [479.6, 577.1, 33.0]
+azimuth_deg = 270.0
+downtilt_deg = 9.2
+power_dbm = 46.0
+
+[[receivers]]
+name = "rx_raffles_place"
+position = [-498.0, -100.0, 1.5]
+expect = "Raffles Place (pedestrian plaza)"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_boat_quay"
+position = [-760.0, 412.0, 1.5]
+expect = "Boat Quay (riverside promenade)"   # moved 2 m from the OSM point
+
+[[receivers]]
+name = "rx_merlion"
+position = [-184.0, 204.0, 1.5]
+expect = "Merlion Park"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_esplanade"
+position = [-132.0, 520.0, 1.5]
+expect = "Esplanade forecourt"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_clifford_pier"
+position = [-255.0, -110.0, 1.5]
+expect = "Clifford Pier (bayfront)"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_lau_pa_sat"
+position = [-582.0, -486.0, 1.5]
+expect = "Lau Pa Sat"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_mbfc"
+position = [-115.0, -520.0, 1.5]
+expect = "Marina Bay Financial Centre"   # moved 4 m from the OSM point
+
+[[receivers]]
+name = "rx_bayfront_plaza"
+position = [146.0, -488.0, 1.5]
+expect = "Bayfront Event Plaza"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_mbs_promenade"
+position = [261.0, -104.0, 1.5]
+expect = "Marina Bay Sands promenade (Event Plaza)"   # moved 0 m from the OSM point
+
+[[receivers]]
+name = "rx_artscience"
+position = [326.0, 164.0, 1.5]
+expect = "ArtScience Museum"   # moved 7 m from the OSM point
+
+[[receivers]]
+name = "rx_flyer"
+position = [777.0, 481.0, 1.5]
+expect = "Singapore Flyer"   # moved 6 m from the OSM point
+
+[[receivers]]
+name = "rx_bay_water_taxi"
+position = [100.0, -50.0, 1.5]
+expect = "on Marina Bay (water taxi)"   # moved 0 m from the OSM point
+
+[paths]
+# as in the Singapore studies: specular + refraction + diffraction for the link lines; receiver levels come from
+# the converged radio map (docs: "Accuracy settings")
+max_depth = 10
+samples_per_src = 3_000_000
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = false
+deterministic = true
+seed = 42
+
+[radio_map]
+center = [0.0, 0.0, 1.5]
+size = [2000.0, 2000.0]
+cell_size = [2.0, 2.0]
+samples_per_tx = 1_000_000_000   # per sector, as in the small-area studies
+max_depth = 10
+diffraction = true
+edge_diffraction = true
+diffuse_reflection = true
+seed = 42
+display_metric = "rx_power"
+vmin_db = -110.0
+vmax_db = -20.0   # as sg_macro: the macro network is strong almost everywhere
+coverage_threshold_db = -130.0
+
+[render]
+camera_position = [-1100.0, -2000.0, 2300.0]
+camera_look_at = [0.0, 0.0, 0.0]
+resolution = [1400, 1050]
+num_samples = 64
+paths_camera_position = [-700.0, -1300.0, 1400.0]
+paths_camera_look_at = [-150.0, -50.0, 0.0]
+
+# 3-D signal volume (coverage shells + height slider + dark view in the viewer), as for Raffles Place but on
+# 8 m cells (2 km: 31 heights x 250 x 250 cells) and solved a few sectors at a time (see src/sionna_stack/volume.py).
+# 3e8 rays per sector on 8 m cells = more rays per cell than the Raffles volumes (3e8 on 4 m cells).
+[volume]
+height_start = 1.5
+height_step = 5.0
+height_stop = 150.0
+cell_size = 8.0
+samples_per_tx = 300_000_000
+shell_levels = [-45.0, -35.0, -25.0]    # received power [dBm], inside every band's p5-p95 range (tools/volume_stats.py):
+                                        # 700 MHz -37..-18, 3.5 GHz -51..-32 dBm; the network is strong everywhere
+slice_y = 0.0                           # vertical-cut figure west-east through the middle (Fullerton - bay - MBS)

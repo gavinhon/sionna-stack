@@ -51,6 +51,8 @@ More animations (signal at height from 1.5 to 150 m, the rooftop macro, the mmWa
 16. [CesiumJS viewer](#16-cesiumjs-viewer)
 17. [Accuracy upgrade: materials, 10 bands, realistic transmitters](#17-accuracy-upgrade-materials-10-bands-realistic-transmitters)
 18. [3-D coverage: shells and height slider](#18-3-d-coverage-shells-and-height-slider)
+19. [Material close-ups](#19-material-close-ups)
+20. [Wide-area example: Downtown Core](#20-wide-area-example-downtown-core)
 
 ---
 
@@ -681,8 +683,8 @@ serving files from the Linux filesystem to a Windows process is slow and unrelia
   and opacity, ray paths toggled per receiver (one colour per receiver), TX/RX markers with popups (LOS, paths,
   path gain, RX power, SNR), link-metrics table (SNR and Shannon capacity for the realistic runs), building
   materials key.
-* **3-D coverage** (Fixed TX tab, runs with a volume): coverage shells per level and the signal map floating at a
-  chosen height, 1.5–150 m (§18).
+* **3-D coverage** (Fixed TX tab, runs with a volume): coverage shells per level, the signal map floating at a
+  chosen height, 1.5–150 m, and a **dark view** (`?dark=1`) where only the signal is coloured (§18).
 * **Moving TX tab:** Cesium timeline and play button; the TX moves along its route with a trail, the radio map
   and paths change per snapshot, and a chart shows total path gain vs time for each receiver with a cursor
   (dots = LoS).
@@ -730,7 +732,8 @@ Goal: results as close to a real deployment as possible without measurements. Wh
 ```bash
 bash tools/run_all_singapore.sh
 ```
-runs all three experiments at full accuracy, exports them for the viewer and runs the sensitivity study (≈1 h;
+runs the three Raffles Place experiments and the Downtown Core network (§20) at full accuracy, exports them for
+the viewer and runs the sensitivity study (≈1 h 20 min;
 log in `logs/`; `bash tools/follow_log.sh` shows progress).
 
 ```bash
@@ -782,7 +785,11 @@ one Sionna mesh radio map made of stacked measurement sheets (validated against 
 
 * `volume_slices.png`: a vertical cut through the transmitter for every band;
 * `volume_shells_3d.png`: one coverage shell (a fixed signal level) per band, the 3-D pattern vs frequency;
-* in the viewer (**3-D coverage**, Fixed TX mode): translucent **coverage shells** at three levels and the
+* `volume_shell_levels.png`: the vertical cut with every shell level drawn as a line and the share of the air
+  inside it. A shell is only a boundary: a level exceeded almost everywhere (e.g. −45 dBm at 700 MHz in the
+  Downtown Core: 99 %) has no surface near the transmitters and only wraps the weak pockets far away;
+* in the viewer (**3-D coverage**, Fixed TX mode): translucent **coverage shells** at three levels, each with its
+  share of the air inside and a hover explanation of what the surface shows at the current band, and the
   coloured map **floating at any height** (slider), switchable per band.
 
 Add it to an existing run without re-simulating the rest:
@@ -795,10 +802,75 @@ uv run scripts/run_volume.py configs/sg_macro.toml outputs/sg_macro/latest
 uv run scripts/export_geo.py outputs/sg_macro/latest
 ```
 
-or for all three studies: `bash tools/run_all_volumes.sh` (≈ 20 min). To change only the shell levels (`[volume] shell_levels`), add `--figures-only` to `run_volume.py` (seconds, no GPU) and export again; `uv run python tools/volume_stats.py <run>` shows the value range to choose them from. Details: User Guide §12.6, Developer Guide §23.
+or for all four studies (the three Raffles Place ones and the Downtown Core): `bash tools/run_all_volumes.sh`
+(≈ 30 min). To change only the shell levels (`[volume] shell_levels`), add `--figures-only` to `run_volume.py` (seconds, no GPU) and export again; `uv run python tools/volume_stats.py <run>` shows the value range to choose them from. Details: User Guide §12.6, Developer Guide §23.
 
 **Optional: Docker / devcontainer.** Not provided. Docker Desktop's WSL GPU passthrough doesn't expose OptiX to
 containers (confirmed with AODT), so a container would run on the CPU backend unless you mount
 `~/.local/lib/nvidia-optix-*` and replicate `backend.py`'s preload, which is untested. The WSL distro + uv lock +
 npm lock already give a reproducible environment; if you add a container, base it on `ubuntu:24.04`, install
 `libatomic1`, uv, and run `uv sync --frozen` and `npm ci`.
+
+## 19. Material close-ups
+
+In the city a material's own effect is hidden among many buildings, so two close-ups isolate it (User Guide
+§12.7, Developer Guide §25):
+
+* **Material lab:** one 24 m × 15 m wall, one material at a time (concrete, brick, stone, wood, glass, metal: the
+  city's material definitions), 0.25 m radio maps at 0.9 / 3.5 / 28 GHz compared with no wall (≈ 20 s):
+
+  ```bash
+  uv run scripts/material_lab.py configs/material_lab.toml
+  ```
+
+  ![one wall, six materials](docs/img/material_lab_effect.gif)
+
+  Median loss behind the wall at 3.5 GHz: glass −3.5 dB, wood −2.4, brick −5.8, stone −6.0, concrete −26.6,
+  metal −31.7 (diffraction around the edges only); at 28 GHz concrete and metal both reach the diffraction floor
+  (≈ −40 dB). A reflection adds at most ≈ +3 dB where the transmitter is also seen directly.
+* **City close-up** from the sensitivity runs (no new simulation): untagged buildings as concrete vs glass, and
+  smooth vs rough walls, 200 m around the transmitter:
+
+  ```bash
+  uv run scripts/material_closeup_city.py outputs/sensitivity/sg_raffles_place/20260927-220101
+  ```
+
+  Glass buildings add 10–15 dB (up to 25 dB) in the streets behind them at 700 MHz and 3.5 GHz and hardly
+  matter at 28 GHz and above; wall roughness works the other way round, adding > 10 dB on 4 % of the street
+  area at 700 MHz and 13 % at 140 GHz.
+
+## 20. Wide-area example: Downtown Core
+
+`configs/sg_downtown_core.toml`: 2 km × 2 km (Boat Quay / Padang → Marina Bay Sands / Gardens by the Bay),
+≈ 1,500 buildings plus 0.86 km² of water (Marina Bay, Singapore River) with an ITU-R P.840 water model, a
+**9-site macro network** (27 sectors on roof edges, ISD 500 m, from `scripts/suggest_sites.py`) and **12
+receivers at landmarks** found by name in OpenStreetMap; 700 MHz, 1.8 GHz, 3.5 GHz; ≈ 16 min including the
+3-D volume.
+
+```bash
+uv run scripts/make_osm_scene.py --name sg_downtown_core --lat 1.2851 --lon 103.8561 --size 2000
+```
+
+```bash
+uv run scripts/run_experiment.py configs/sg_downtown_core.toml
+```
+
+```bash
+uv run scripts/export_geo.py outputs/sg_downtown_core/latest
+```
+
+![Downtown Core coverage](docs/img/sg_downtown_comparison.png)
+
+Results (run 20260928-203459): 99.6 % of the outdoor area above 0 dB SNR at 3.5 GHz (median −41 dBm);
+receivers −15…−33 dBm at 700 MHz and −29…−51 dBm at 3.5 GHz (Boat Quay weakest). No inter-site interference is
+modelled yet (SNR, not SINR). Large runs are solved in batches of transmitters to fit the GPU (Developer Guide
+§26). User Guide §12.8 explains the example.
+
+3-D coverage (shells, height slider, dark view) as for Raffles Place, on 8 m cells: computed by
+`run_experiment.py` (the config has a `[volume]` section), or added to an existing run (≈ 8 min):
+
+```bash
+uv run scripts/run_volume.py configs/sg_downtown_core.toml outputs/sg_downtown_core/latest
+```
+
+![Downtown Core shells](docs/img/sg_downtown_volume_shells_3d.png)

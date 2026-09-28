@@ -619,21 +619,27 @@ Switching the band buttons (reference transmitter, same colour scale for all 10 
 
 If the view is cluttered, press **Top view**: from straight above, the coloured ground reads like a coverage map.
 
-**The panel on the right:**
+**The panel on the left** (Cesium's pop-ups open on the right). The top part is always visible; the rest is in
+four tabs. **?** opens the "What am I looking at?" card beside the panel, **‹** hides the panel (the **›** button
+brings it back).
 
-| control | what it does |
-|---|---|
-| Simulation run | pick which exported run to show (newest first). New runs appear after you export them and reload the page. |
-| **Fixed TX** / **Moving TX** | switch between the fixed small cell (section 9) and the driving vehicle (section 10) |
-| Band | 3.5 GHz or 28 GHz. The colour scale stays the same, so colours are comparable. |
-| Radio map | the coloured "carpet" of signal strength on the streets; switch it on/off and change its transparency |
-| Ray paths per receiver | show/hide the lines from the transmitter to each receiver. Line colour = which receiver (blue / orange / green, same as the chart); solid and thick = strong path, faint and thin = weak path. |
-| Total path gain vs time | (Moving TX) the chart from section 10, with a dashed line at the current moment |
-| Link metrics | (Fixed TX) the numbers table for the selected band |
-| 3-D coverage | (Fixed TX) coverage shells and the floating "signal at height" map with its height slider; see section 12.6 |
-| Camera | **Top view** (straight down, like a map) or **3D view** |
-| Layers | show/hide the simulation's buildings and change their transparency (make them see-through to look at paths in the street canyons) |
-| Base map | OpenStreetMap (needs internet, no account), Natural Earth (works offline, very coarse), Cesium ion (real terrain and satellite images, needs a free Cesium account and token; see the rebuild manual §3.9) |
+| where | control | what it does |
+|---|---|---|
+| top | Simulation run | pick which exported run to show (newest first). New runs appear after you export them and reload the page. Hover the grey description for the full text. |
+| top | **Fixed TX** / **Moving TX** | fixed transmitters, or the driving vehicle (section 10; only the Raffles reference run has one, hover the button for why it's greyed out) |
+| top | Band buttons + colour legend | switch frequency; the colour scale stays the same, so colours are comparable |
+| **Signal** tab | Coverage map on the ground | the coloured "carpet" of signal strength on the streets; on/off and transparency |
+| Signal tab | Total path gain vs time | (Moving TX) the chart from section 10, with a line at the current moment |
+| Signal tab | Link metrics | (Fixed TX) the numbers table for the selected band |
+| **3-D** tab | dark view, coverage shells, signal at height | (Fixed TX, runs with a 3-D volume) see section 12.6; greyed out otherwise |
+| **Receivers** tab | Ray paths per receiver | show/hide the lines to each receiver. Line colour = which receiver (same as the chart); solid and thick = strong path, faint and thin = weak path. |
+| **Scene** tab | Camera | **Top view** (straight down, like a map) or **3D view** |
+| Scene tab | Buildings | show/hide the simulation's buildings, their transparency, and the material colour key |
+| Scene tab | Base map | OpenStreetMap (needs internet, no account), Natural Earth (works offline, very coarse), Cesium ion (real terrain and satellite images, needs a free Cesium account and token; see the rebuild manual §3.9) |
+| Scene tab | footer | backend, versions, accuracy notes, warnings and data credits |
+
+The Cesium logo is hidden. The map-data credit stays visible at the bottom right, as the OpenStreetMap licence
+requires; with a Cesium ion token the ion logo is shown, as ion's terms require.
 
 **In the map:** drag to rotate, scroll to zoom, right-drag to tilt. **Click** a receiver marker to see its numbers
 (line of sight, number of paths, signal, delay spread for each band), or click a path line to see that path's
@@ -811,7 +817,12 @@ uv run scripts/run_volume.py configs/sg_macro.toml outputs/sg_macro/latest --fig
 uv run scripts/export_geo.py outputs/sg_macro/latest
 ```
 
-**In the viewer** (section *3-D coverage* in the panel, Fixed TX mode):
+**In the viewer** (the **3-D** tab of the panel, Fixed TX mode):
+* **dark view:** the clearest way to look at the shells. The street map turns dark grey, buildings become faint
+  grey outlines (no material colours), the ground map and ray paths are hidden, and only the signal is coloured
+  (bright teal shells, plus the height map if you switch it on). The camera moves to a lower, closer angle. It
+  stays on while you switch bands; untick it to get the normal view back. Tip: add `&dark=1` to the address to
+  open the viewer straight in this view.
 * **shell checkboxes:** switch each level on or off (e.g. −100 / −90 / −80 dB for the reference run, −60 / −45 / −30 dBm for the macro). The outer (weaker) shell is
   the edge of usable signal, the inner ones the strong core. Where a shell reaches the edge of the computed box
   (250 m from the centre, 150 m high), it's left open: the signal continues beyond the modelled area.
@@ -828,6 +839,252 @@ across the whole area. The purple patches that remain up there are inside the ta
 
 Inside buildings the shells use the simulated signal that passes through walls: at low frequencies shells go
 through buildings (signal really penetrates), at mmWave they wrap around them.
+
+#### Why is there sometimes nothing around the transmitter, only shapes far away?
+
+A shell is **only the boundary surface** where the signal equals its level. Inside it the signal is stronger,
+outside weaker, but the inside itself is empty (see-through). So what you see depends on how much of the air is
+stronger than the level:
+
+| share of the air inside the shell | what you see | how to read it |
+|---|---|---|
+| **almost all** (more than ~85 %) | nothing around the transmitters; scattered shapes far away and behind towers | the level is exceeded almost everywhere. The shapes wrap the few **weaker** pockets. Empty space = strong signal |
+| **some** (~15–85 %) | a large, lumpy dome with holes | the dome is the **edge of coverage** at that level: stronger on the transmitter side, weaker beyond |
+| **little** (less than ~15 %) | small bubbles right around the transmitters | only the air close to the antennas is this strong |
+| **none** | nothing at all | no place reaches that level at this band |
+
+Example from your viewer: the Downtown Core at **700 MHz**, shell **−45 dBm**. **99 %** of the outdoor air is stronger
+than −45 dBm, so there is no surface near any of the 9 sites; the surfaces you see are the remaining 1 %, typically
+**414 m** from the nearest site (the stronger air is typically 277 m from one). Switch to **3.5 GHz** and the same
+level encloses only 72 % of the air: now the surface appears everywhere between the sites. At −35 dBm, 3.5 GHz
+gives only 11 %: bubbles around each site.
+
+**In the viewer** the share is written next to each shell (e.g. "(99 % of the air inside)"). Hover a shell for
+the explanation that fits the current band, and the note below the shells explains the ones that are ticked.
+
+The same on a vertical cut through the area: each coloured line is where a shell crosses the cut. For the
+Downtown Core, the red −45 dBm line barely appears at 700 MHz (99 % is stronger), runs through the western CBD at
+3.5 GHz (72 %), and the white −25 dBm line shrinks from large regions (30 %) to rings around the antennas (1 %):
+
+![shell levels, Downtown Core](img/sg_downtown_volume_shell_levels.png)
+
+The reference transmitter in Raffles Place shows the whole progression over 10 bands: the red −100 dB line only
+circles weak pockets behind buildings at 700 MHz (92 % inside), becomes the coverage edge at 2–7 GHz, and shrinks
+to a ring around the antenna at 140 GHz (under 1 %):
+
+![shell levels, Raffles Place reference](img/sg_ref_volume_shell_levels.png)
+
+Share of the outdoor air inside each shell, for every run in the viewer:
+
+| run (unit) | band | lowest level | middle level | highest level |
+|---|---|---|---|---|
+| Raffles reference (path gain dB: −100 / −90 / −80) | 700 MHz | 92 % | 67 % | 37 % |
+| | 3.5 GHz | 51 % | 28 % | 4 % |
+| | 28 GHz | 6 % | <1 % | 0 % |
+| | 140 GHz | <1 % | 0 % | 0 % |
+| Rooftop macro (dBm: −60 / −45 / −30) | 700 MHz | >99 % | 88 % | 30 % |
+| | 3.5 GHz | 83 % | 29 % | 5 % |
+| | 7.5 GHz | 53 % | 14 % | 1 % |
+| mmWave small cell (dBm: −100 / −85 / −70) | 28 GHz | 86 % | 45 % | 10 % |
+| | 39 GHz | 79 % | 35 % | 7 % |
+| | 140 GHz | 48 % | 11 % | 1 % |
+| Downtown Core network (dBm: −45 / −35 / −25) | 700 MHz | 99 % | 92 % | 30 % |
+| | 1.8 GHz | 95 % | 41 % | 3 % |
+| | 3.5 GHz | 72 % | 11 % | 1 % |
+
+How to use this: to see "how far does the coverage reach", pick the level whose share is in the middle (roughly
+20–80 %) at the band you're looking at; its shell is then the edge of coverage. A level near 100 % shows you the
+**weak spots** instead, which is useful too (where would a phone struggle?), as long as you remember that the
+empty space around the antennas means strong signal, not no signal. The same figure for the other runs:
+[rooftop macro](img/sg_macro_volume_shell_levels.png),
+[mmWave small cell](img/sg_smallcell_volume_shell_levels.png).
+
+### 12.7 What the building material does (close-up)
+
+In the city every spot gets signal from many buildings at once, so one material's effect is almost impossible to
+pick out on the maps. Two close-ups make it visible.
+
+**1. The material lab: one wall, one material at a time.** A single wall, 24 m wide and 15 m high, stands 10 m
+from a transmitter (red dot). The simulation runs once with no wall and once per material (the same six materials,
+thicknesses and roughness as the Singapore buildings), and the pictures show **what the wall changed** compared
+with no wall: **blue = signal the wall took away** (the shadow behind it), **red = signal it added** (its
+reflection, in front). Seen from above; the wall is the black line.
+
+![one wall, six materials](img/material_lab_effect.gif)
+
+All materials and bands in one picture (dotted outline = the wall's shadow zone, dashed = where its reflection
+lands):
+
+![material lab: effect of each material](img/material_lab_effect.png)
+
+The same along one line straight through the transmitter and the wall. The drop at the wall is what each
+material lets through:
+
+![signal across the wall](img/material_lab_profile.png)
+
+Median change behind the wall (in its shadow) and in front of it (where its reflection lands):
+
+| material | 900 MHz: behind / in front | 3.5 GHz: behind / in front | 28 GHz: behind / in front |
+|---|---|---|---|
+| concrete (30 cm) | −10.6 dB / +0.2 dB* | −26.6 dB / +0.2 dB | −39.8 dB / +0.2 dB |
+| brick (20 cm) | −5.3 dB / +0.2 dB* | −5.8 dB / +0.1 dB | −8.0 dB / +0.1 dB |
+| stone (marble, 30 cm) | −3.3 dB / +0.4 dB* | −6.0 dB / +0.3 dB | −24.8 dB / +0.2 dB |
+| wood (10 cm) | −0.7 dB / +0.0 dB | −2.4 dB / +0.0 dB | −20.5 dB / +0.0 dB |
+| glass (double glazing, 2.4 cm) | −3.1 dB / +0.5 dB | −3.5 dB / +0.5 dB | −6.6 dB / +0.2 dB |
+| metal | −25.9 dB / +1.0 dB* | −31.7 dB / +1.0 dB | −40.1 dB / +1.0 dB |
+
+\* below 1 GHz there is no ITU data for these materials; the values are extrapolated.
+
+How to read it:
+* **Behind the wall, the material is everything.** Glass and brick let most of the signal through at every band;
+  wood and stone are almost transparent at low frequencies but block a lot at 28 GHz; 30 cm of concrete loses
+  about 11 dB at 900 MHz, 27 dB at 3.5 GHz and 40 dB at 28 GHz.
+* **Metal lets nothing through.** The −26 to −40 dB behind a metal wall is signal that **bends around the wall's
+  edges** (diffraction), not through it. That is also the floor for concrete at 28 GHz (−40 dB, same as metal):
+  once a wall blocks more than the edges let around, the material no longer matters.
+* **In front of the wall, reflections add little where you can see the transmitter**: at most about +3 dB right
+  next to a metal wall (the red band), +1 dB on average for metal, less for the others. Reflections matter where
+  the direct path is blocked: in side streets and behind corners, the reflected and scattered signal is often
+  all there is (see the city close-ups below).
+* **Brick in the ITU model is dry, low-loss brick** (−8 dB at 28 GHz for 20 cm). Real walls with moisture,
+  reinforcement or several layers lose more. Glass is plain double glazing; the metal-coated ("low-e") glass of
+  many modern towers blocks far more and is not modelled.
+
+**2. Real Raffles Place streets.** Each close-up compares two otherwise identical runs of the reference
+transmitter, 200 m × 200 m around it (grey = inside buildings, red dot = transmitter, white dots = receivers).
+The right column shows the difference: **red = stronger** in the second run, **blue = weaker**.
+
+Buildings without a material tag in OpenStreetMap (most of them) as **concrete** or as **glass**. The cyan
+buildings are the ones whose material changed:
+
+![concrete vs glass buildings](img/sg_closeup_materials.png)
+
+At 700 MHz and 3.5 GHz glass buildings let the signal through: the streets behind them typically get 10–15 dB
+more (up to 25 dB in places); about 7 % of the street area gains more than 10 dB. At 28 and 140 GHz the difference
+almost disappears, because a ray through a building crosses at least two glass walls (about 7 dB each at 28 GHz,
+more at 140 GHz), and that is too much.
+
+Smooth walls (mirror-like reflections only) vs **twice as rough** walls (more diffuse scattering):
+
+![smooth vs rough walls](img/sg_closeup_roughness.png)
+
+Here it's the other way round: roughness matters more the higher the frequency. The share of the street area that
+gets more than 10 dB extra from rougher walls grows from 4 % at 700 MHz to 9 % at 28 GHz and 13 % at 140 GHz: in
+side streets that smooth, mirror-like walls leave almost dark, the scattered signal from rough walls is what
+arrives (red). A few spots that a mirror reflection used to reach get slightly weaker (blue, a few dB).
+
+**Try it yourself:**
+
+```bash
+uv run scripts/material_lab.py configs/material_lab.toml
+```
+
+(about 20 seconds; results in `outputs/material_lab/latest/`). Change the wall size, the transmitter position or
+the bands in `configs/material_lab.toml`. The city close-ups are drawn from the sensitivity study (no new
+simulation):
+
+```bash
+uv run scripts/material_closeup_city.py outputs/sensitivity/sg_raffles_place/20260927-220101
+```
+
+### 12.8 The wide-area example: the whole Downtown Core with a network of sites
+
+Everything above zooms into 600 m around Raffles Place. The second example covers **2 km × 2 km**: from Boat
+Quay and the Padang to Marina Bay Sands and Gardens by the Bay. In the viewer, choose
+**sg_downtown_core** in the *Simulation run* list.
+
+What is in it:
+* **About 1,500 buildings** from OpenStreetMap, and **water**: Marina Bay, the Singapore River and part of the
+  Kallang Basin are a real water surface (0.86 km²), not concrete. Water reflects radio waves strongly, almost
+  like a mirror, so the bay behaves differently from the streets (see the Developer Guide §10 for the water
+  model).
+* **A network of 9 rooftop sites, 3 sectors each (27 transmitters)**, about 500 m apart, which is typical for a
+  dense city core. Each site stands on a 25–100 m roof (operators use mid-rise roofs, not the tops of 250 m
+  towers), and each sector sits at the edge of its roof facing outwards, as real antennas do. The sites were
+  placed by a script (`scripts/suggest_sites.py`) that mimics how a planner lays out a network.
+* **12 receivers at places you know**, found by name in OpenStreetMap: Raffles Place, Boat Quay, Merlion Park,
+  the Esplanade, Clifford Pier, Lau Pa Sat, Marina Bay Financial Centre, Bayfront Event Plaza, the Marina Bay
+  Sands promenade, the ArtScience Museum, the Singapore Flyer, and a water taxi in the middle of the bay.
+* **Three bands**: 700 MHz, 1.8 GHz and 3.5 GHz (the macro layers). Every phone connects to the strongest
+  sector, as a real phone would.
+
+![Downtown Core coverage per band](img/sg_downtown_comparison.png)
+
+Red triangles are the sites (the three sectors of a site sit at different edges of its roof), white dots the
+receivers.
+
+Signal at the receivers (dBm):
+
+| receiver | 700 MHz | 1.8 GHz | 3.5 GHz |
+|---|---|---|---|
+| Raffles Place | −20 | −30 | −37 |
+| Boat Quay | −33 | −44 | −51 |
+| Merlion Park | −17 | −26 | −32 |
+| Esplanade | −22 | −31 | −37 |
+| Clifford Pier | −15 | −23 | −29 |
+| Lau Pa Sat | −24 | −32 | −37 |
+| Marina Bay Financial Centre | −23 | −31 | −37 |
+| Bayfront Event Plaza | −25 | −34 | −39 |
+| Marina Bay Sands promenade | −25 | −33 | −39 |
+| ArtScience Museum | −25 | −33 | −39 |
+| Singapore Flyer | −23 | −31 | −37 |
+| water taxi on the bay | −20 | −29 | −35 |
+
+How to read it:
+* **With a proper network, every place is covered.** 99.6 % of the outdoor area has usable signal (SNR above
+  0 dB) even at 3.5 GHz; the weakest spot of the twelve is Boat Quay, in the narrow riverside streets.
+* **The bands still differ**: 13–18 dB between 700 MHz and 3.5 GHz at the receivers, 30–50 dB behind buildings
+  (the right-hand difference map), but with a site every 500 m even 3.5 GHz stays strong. That is why operators use more sites for higher bands.
+* **Open water carries the signal far**: the whole bay is yellow, and the water taxi receives signal from many
+  directions (the longest echoes of all receivers, about 0.5 µs), because the water and the waterfront facades
+  reflect it.
+* **Caution: no interference yet.** The signal-to-noise ratios in the viewer (36–82 dB) are far higher than any
+  real phone would see, because the simulation doesn't count the other sites' signals as interference. In a real
+  network, a phone between two sites hears both, and that is what limits speed. Adding interference (SINR) is a
+  possible next step.
+
+**In 3-D, with the dark view.** The same *3-D coverage* controls as for Raffles Place work here (section 12.6):
+coverage shells at −45 / −35 / −25 dBm, the signal map floating at any height from 1.5 to 150 m, and the
+**dark view**. The volume uses 8 m boxes instead of 4 m because the area is 16 times larger. The levels are
+higher than for the single Raffles macro because a whole network is much stronger everywhere.
+
+![Downtown Core shells per band](img/sg_downtown_volume_shells_3d.png)
+
+The −35 dBm shell (height stretched ×3.3 in this picture only, so it isn't a flat sheet): at **3.5 GHz** it is a
+set of separate bubbles, one around each site; at **1.8 GHz** they grow and merge into one network; at
+**700 MHz** almost all the air is stronger than −35 dBm, so the surface only outlines the few weaker pockets
+behind towers. A west-east cut through the middle (Fullerton on the left, the bay in the middle,
+Marina Bay Sands on the right; grey = inside buildings):
+
+![Downtown Core vertical cut](img/sg_downtown_volume_slices.png)
+
+Above the bay the signal stays strong up to 150 m at every band, while behind the towers it drops.
+
+**Tips for the viewer:** the area is 16 times larger than Raffles Place, so use **Top view** first, then zoom in.
+With 12 receivers the ray paths get busy: untick receivers in the list to show only the ones you want (the dark
+view hides them anyway).
+
+**Run it yourself** (about 16 minutes on the RTX 5080: 8 for the maps, 8 for the 3-D volume):
+
+```bash
+uv run scripts/run_experiment.py configs/sg_downtown_core.toml
+```
+
+```bash
+uv run scripts/export_geo.py outputs/sg_downtown_core/latest
+```
+
+To build the same kind of example for **another area**: make the scene (`--size` sets the side of the square in
+metres), let the script suggest sites, then copy its output into a config file (copy
+`configs/sg_downtown_core.toml` and replace the `[[transmitters]]` and `[[receivers]]`):
+
+```bash
+uv run scripts/make_osm_scene.py --name my_area --lat 1.2851 --lon 103.8561 --size 2000
+```
+
+```bash
+uv run scripts/suggest_sites.py scenes/my_area --isd 500
+```
 
 ## 13. Changing the experiment yourself
 

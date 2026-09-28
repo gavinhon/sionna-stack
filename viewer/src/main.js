@@ -19,6 +19,7 @@ const state = {
   model: null, osmBuildings: null, rmLayers: {}, frameLayers: [], pathSources: {}, devices: null,
   mobilitySource: null, rxShow: {}, frameIndex: -1,
   shellModels: [], shellShow: {}, layerEntity: null, volumeToken: 0,
+  dark: params.get("dark") === "1", // "dark view": only the signal is coloured (see applyDark)
 };
 
 // ---------------------------------------------------------------------------------------------- viewer
@@ -118,8 +119,8 @@ async function loadRun(path) {
   $("subtitle").textContent = `${exp.experiment} · run ${exp.run_id} · origin ${exp.origin.lat.toFixed(5)}, ${exp.origin.lon.toFixed(5)}`;
   $("tab-mobility").disabled = !exp.mobility;
   $("tab-mobility").title = exp.mobility ? "Play the transmitter moving along its route"
-    : "No moving-transmitter simulation in this run";
-  $("mobility-hint").hidden = !!exp.mobility;
+    : "No moving transmitter in this run: pick sg_raffles_place for the timeline and play button";
+  $("mobility-hint").hidden = true; // the explanation is the button's tooltip (keeps the header short)
   buildLegend(exp.legend);
   buildVolumeControls(exp);
   buildBandButtons(exp.bands);
@@ -129,22 +130,34 @@ async function loadRun(path) {
     (exp.warnings.length ? `<b>Warnings:</b> ${exp.warnings.join("; ")}<br>` : "") +
     `Accuracy: ${exp.accuracy.join(" ")}<br>Ground offset applied: ${state.groundHeight.toFixed(1)} m ` +
     `(${state.groundHeight ? "terrain height at origin" : "ellipsoid, no terrain"})<br>` +
-    `Buildings: © OpenStreetMap contributors (ODbL).`;
+    `Buildings${baseMode === "osm" ? " and map tiles" : ""}: © OpenStreetMap contributors (ODbL). ` +
+    `Rendering: CesiumJS.`;
 
   state.origin = origin;
-  setCamera("3d", 0);
+  setCamera(state.dark && exp.volume ? "dark" : "3d", 0);
   setBand(state.band && exp.bands.some((b) => b.slug === state.band) ? state.band : exp.bands[0].slug);
   await setMode(params.get("mode") === "mobility" && exp.mobility ? "mobility" : "static");
 }
 
 function setCamera(kind, duration = 1.0) {
-  // 3D view: high and steep enough that the 150-280 m towers don't hide the streets
-  const range = kind === "top" ? 750 : 1150;
-  const pitch = kind === "top" ? -89.9 : -58;
+  // 3D view: high and steep enough that the 150-280 m towers don't hide the streets.
+  // "dark": lower and closer, so the height of the shells is visible (the angle of the docs GIFs)
+  // distances are tuned for the 500 m Raffles Place maps and scaled with the run's map size (2 km: x4)
+  const s = sceneScale();
+  const range = s * ({ top: 750, dark: 950 }[kind] ?? 1150);
+  const pitch = { top: -89.9, dark: -32 }[kind] ?? -58;
   const heading = kind === "top" ? 0 : 15;
-  state.viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(state.origin, 380), {
+  state.viewer.camera.flyToBoundingSphere(new Cesium.BoundingSphere(state.origin, 380 * s), {
     offset: new Cesium.HeadingPitchRange(Cesium.Math.toRadians(heading), Cesium.Math.toRadians(pitch), range), duration,
   });
+}
+
+function sceneScale() {
+  // width of the run's radio map in metres / 500 m (the Raffles Place studies), never below 1
+  const r = state.exp?.bands?.[0]?.radio_map?.rectangle;
+  if (!r) return 1;
+  const w = (r.east - r.west) * 111320 * Math.cos(Cesium.Math.toRadians((r.north + r.south) / 2));
+  return Math.max(1, w / 500);
 }
 
 // ------------------------------------------------------------------------------------------------ UI parts
@@ -235,6 +248,7 @@ function clearVolume() {
 function buildVolumeControls(exp) {
   const vol = exp.volume;
   $("volume-section").hidden = !vol;
+  syncVolumeTab();
   if (!vol) return;
   const levels = vol.shell_levels.slice().sort((a, b) => a - b);
   if (!Object.keys(state.shellShow).length) levels.forEach((l, i) => (state.shellShow[l] = i === 1 || levels.length === 1));
@@ -248,9 +262,11 @@ function buildVolumeControls(exp) {
   $("shell-toggles").innerHTML = "";
   levels.forEach((l) => {
     const row = document.createElement("label");
-    row.className = "row";
+    row.className = "row shell-row";
+    row.dataset.level = String(l);
     row.innerHTML = `<input type="checkbox" ${state.shellShow[l] ? "checked" : ""}/>` +
-      `<span class="swatch" style="background:${col(l)}"></span>shell: signal ≥ ${l} ${unit}`;
+      `<span class="swatch" style="background:${col(l)}"></span>shell: signal ≥ ${l} ${unit}` +
+      ` <span class="muted small pct"></span>`;
     row.querySelector("input").onchange = (e) => { state.shellShow[l] = e.target.checked; showVolume(); };
     $("shell-toggles").appendChild(row);
   });
@@ -259,21 +275,74 @@ function buildVolumeControls(exp) {
   if (Number($("layer-h").value) > n - 1) $("layer-h").value = "0";
 }
 
+// What a shell shows depends on how much of the air is inside it (pct_inside, from the exporter): a level that
+// almost all the air exceeds has no surface near the transmitters and only wraps the few weak pockets far away.
+function fmtPct(p) {
+  if (p > 0 && p < 0.5) return "<1";
+  if (p >= 99.5 && p < 100) return ">99";
+  return String(Math.round(p));
+}
+
+function shellExplanation(s, unit, band) {
+  const p = s.pct_inside, L = `${s.level} ${unit}`;
+  if (p === undefined) return "";
+  const far = s.dist_outside_m != null ? `, typically ${s.dist_outside_m} m from the nearest transmitter` : "";
+  const near = s.dist_inside_m != null ? ` (typically within ${s.dist_inside_m} m of a transmitter)` : "";
+  if (p <= 0 && s.dist_inside_m != null) {
+    return `${band}: practically no air reaches ${L} (less than 0.05 %): at most a tiny speck right at the ` +
+      `antenna, usually too small to see.`;
+  }
+  if (p <= 0) return `${band}: no place reaches ${L} at this band, so there is no shell.`;
+  if (p >= 100) return `${band}: all the air is stronger than ${L}, so there is no boundary to draw.`;
+  if (p >= 85) {
+    return `${band}: ${fmtPct(p)} % of the outdoor air is stronger than ${L}, so almost everything is INSIDE this ` +
+      `shell. A shell is only the boundary surface, so around the transmitters there is nothing to see (it is all ` +
+      `stronger). The surfaces you do see wrap the few weaker pockets (${fmtPct(100 - p)} % of the air)${far}, ` +
+      `behind towers or at the edge of coverage. Empty space = stronger than ${L}.`;
+  }
+  if (p <= 15) {
+    return `${band}: only ${fmtPct(p)} % of the air is this strong: the shell is a small bubble around the ` +
+      `transmitters${near}. Everything outside the bubble is weaker than ${L}.`;
+  }
+  return `${band}: ${fmtPct(p)} % of the air is stronger than ${L}. The surface is the edge of this coverage: ` +
+    `stronger on the transmitter side${near}, weaker beyond it${far}.`;
+}
+
+function updateShellHints() {
+  const vb = volumeBand();
+  const vol = state.exp?.volume;
+  if (!vb || !vol) return;
+  const unit = vol.metric.includes("dBm") ? "dBm" : "dB";
+  const band = state.exp.bands.find((b) => b.slug === state.band)?.label || "";
+  const lines = [];
+  for (const row of $("shell-toggles").querySelectorAll(".shell-row")) {
+    const s = vb.shells.find((x) => x.level === Number(row.dataset.level));
+    const text = s ? shellExplanation(s, unit, band) : "";
+    row.title = text;  // hover explanation
+    row.querySelector(".pct").textContent = s?.pct_inside !== undefined ? `(${fmtPct(s.pct_inside)} % of the air inside)` : "";
+    if (s && state.shellShow[s.level] && text) lines.push(`<b>${s.level} ${unit}</b> - ${text}`);
+  }
+  $("shell-hint").innerHTML = lines.join("<br>");
+  $("shell-hint").hidden = !lines.length;
+}
+
 async function showVolume() {
   const token = ++state.volumeToken; // ignore results of superseded calls (fast band switching)
   clearVolume();
+  updateShellHints();
   const vb = volumeBand();
   if (!vb || state.mode !== "static") return;
   const v = state.viewer, exp = state.exp;
   const origin = Cesium.Cartesian3.fromDegrees(exp.origin.lon, exp.origin.lat, exp.origin.height + state.groundHeight);
   for (const s of vb.shells) {
-    if (!state.shellShow[s.level]) continue;
+    if (!state.shellShow[s.level] || !s.glb) continue;  // no glb: this level has no surface at this band
     const m = await Cesium.Model.fromGltfAsync({
       url: `data/${state.run}/${s.glb}`,
       modelMatrix: Cesium.Transforms.eastNorthUpToFixedFrame(origin),
       upAxis: Cesium.Axis.Y, forwardAxis: Cesium.Axis.X, backFaceCulling: false,
     });
     if (token !== state.volumeToken) return;
+    styleShell(m);
     v.scene.primitives.add(m);
     state.shellModels.push(m);
   }
@@ -306,6 +375,49 @@ function updateLayer() {
   }
 }
 
+// ------------------------------------------------------------------------------------------- dark view
+// Only the signal is coloured: dark grey street map, faint grey buildings (no material colours), no ground map
+// and no ray paths, bright shells (and the height map). Active only in Fixed TX mode on runs with a 3-D volume;
+// otherwise the normal look is kept (the checkbox remembers the choice). URL: ?dark=1.
+const DARK_SHELL = Cesium.Color.fromCssColorString("#35e0c8");
+const DARK_BUILDING = Cesium.Color.fromCssColorString("#c8ced6").withAlpha(0.12);
+
+function darkActive() {
+  return state.dark && state.mode === "static" && !!state.exp?.volume;
+}
+
+function styleShell(m) {
+  const on = darkActive();
+  m.color = on ? DARK_SHELL : Cesium.Color.WHITE;
+  m.colorBlendMode = on ? Cesium.ColorBlendMode.MIX : Cesium.ColorBlendMode.HIGHLIGHT;
+  m.colorBlendAmount = on ? 0.7 : 0.5;
+}
+
+function styleBuildings() {
+  if (!state.model) return;
+  const on = darkActive();
+  state.model.color = on ? DARK_BUILDING : Cesium.Color.WHITE.withAlpha(Number($("bld-alpha").value));
+  state.model.colorBlendAmount = on ? 1.0 : 0.0; // MIX 1 = material colours replaced by grey
+}
+
+function applyDark() {
+  const on = darkActive();
+  const base = state.viewer.imageryLayers.get(0);
+  if (base) { base.brightness = on ? 0.3 : 1.0; base.saturation = on ? 0.2 : 1.0; }
+  styleBuildings();
+  state.shellModels.forEach(styleShell);
+  if (state.mode === "static" && state.exp) showStaticLayers();
+}
+
+function setDark(on, moveCamera = true) {
+  state.dark = on;
+  $("dark-view").checked = on;
+  if (on) params.set("dark", "1"); else params.delete("dark");
+  history.replaceState(null, "", "?" + params.toString());
+  applyDark();
+  if (on && moveCamera && darkActive()) setCamera("dark");
+}
+
 // ------------------------------------------------------------------------------------------- band / mode
 async function setBand(slug) {
   state.band = slug;
@@ -324,11 +436,12 @@ function showStaticLayers() {
     v.imageryLayers.add(layer);
     state.rmLayers[b.slug] = layer;
   }
+  const dark = darkActive();
   for (const [slug, layer] of Object.entries(state.rmLayers)) {
-    layer.show = $("show-rm").checked && slug === state.band;
+    layer.show = $("show-rm").checked && !dark && slug === state.band;
     layer.alpha = Number($("rm-alpha").value);
   }
-  for (const [slug, ds] of Object.entries(state.pathSources)) ds.show = slug === state.band;
+  for (const [slug, ds] of Object.entries(state.pathSources)) ds.show = slug === state.band && !dark;
   state.frameLayers.forEach((l) => l && (l.show = false));
   applyRxVisibility();
 }
@@ -413,14 +526,58 @@ async function setMode(mode) {
     await showMobility();
   }
   $("volume-section").hidden = !(state.exp?.volume && mode === "static");
+  syncVolumeTab();
+  applyDark();
+}
+
+// ------------------------------------------------------------------------------------------------- panel
+// Left panel: header (run, mode, band, legend) + tabs Signal / 3-D / Receivers / Scene; help card; collapse.
+function showPane(name) {
+  document.querySelectorAll(".ptab").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".pane").forEach((p) => p.classList.toggle("active", p.dataset.pane === name));
+  try { localStorage.setItem("sionna.pane", name); } catch { /* storage unavailable: fine */ }
+}
+
+function syncVolumeTab() {
+  // the 3-D tab only makes sense for runs with a volume, in Fixed TX mode
+  const off = $("volume-section").hidden;
+  $("ptab-volume").disabled = off;
+  $("ptab-volume").title = off ? (state.exp?.volume ? "3-D coverage is shown in Fixed TX mode" : "This run has no 3-D volume") : "";
+  if (off && $("ptab-volume").classList.contains("active")) showPane("signal");
+}
+
+function setupPanel() {
+  document.querySelectorAll(".ptab").forEach((b) => (b.onclick = () => !b.disabled && showPane(b.dataset.tab)));
+  let saved = null;
+  try { saved = localStorage.getItem("sionna.pane"); } catch { /* ignore */ }
+  if (params.get("dark") === "1") saved = "volume";
+  if (saved && document.querySelector(`.pane[data-pane="${saved}"]`)) showPane(saved);
+
+  const help = $("help"), btn = $("help-btn");
+  const setHelp = (open) => { help.hidden = !open; btn.setAttribute("aria-expanded", String(open)); };
+  btn.onclick = () => setHelp(help.hidden);
+  $("help-close").onclick = () => setHelp(false);
+
+  const setPanel = (open) => {
+    document.body.classList.toggle("panel-hidden", !open);
+    $("panel-open").hidden = open;
+    if (!open) setHelp(false);
+  };
+  $("collapse-btn").onclick = () => setPanel(false);
+  $("panel-open").onclick = () => setPanel(true);
+  document.body.classList.toggle("base-ion", baseMode === "ion" && !!TOKEN);
 }
 
 // ------------------------------------------------------------------------------------------------- start
 async function main() {
+  setupPanel();
   state.viewer = await createViewer();
   state.viewer.clock.onTick.addEventListener(onTick);
   window.sionnaViewer = state; // for debugging in the browser console: sionnaViewer.viewer, sionnaViewer.exp
-  state.api = { loadRun, setBand, setMode, showStaticLayers, showVolume, updateLayer, onTick }; // used by record.js
+  state.api = { loadRun, setBand, setMode, setDark, showStaticLayers, showVolume, updateLayer, onTick }; // record.js
+
+  $("dark-view").checked = state.dark;
+  $("dark-view").onchange = (e) => setDark(e.target.checked);
 
   $("layer-h").oninput = updateLayer;
   $("show-layer").onchange = updateLayer;
@@ -435,7 +592,7 @@ async function main() {
     state.frameLayers.forEach((l) => l && (l.alpha = Number($("rm-alpha").value)));
   };
   $("show-buildings").onchange = (e) => state.model && (state.model.show = e.target.checked);
-  $("bld-alpha").oninput = (e) => state.model && (state.model.color = Cesium.Color.WHITE.withAlpha(Number(e.target.value)));
+  $("bld-alpha").oninput = styleBuildings;
   $("show-osm-buildings").onchange = async (e) => {
     if (!state.osmBuildings) state.osmBuildings = state.viewer.scene.primitives.add(await Cesium.createOsmBuildingsAsync());
     state.osmBuildings.show = e.target.checked;

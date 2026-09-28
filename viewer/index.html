@@ -7,115 +7,148 @@
   </head>
   <body>
     <div id="cesium"></div>
+
+    <!-- Control panel (left; Cesium's info box opens on the right). Layout: a fixed header with what is changed
+         most (run, mode, band, legend) and four tabs for the rest, so the panel doesn't scroll forever. -->
     <aside id="panel">
-      <header>
-        <h1>Sionna RF Viewer</h1>
-        <p id="subtitle" class="muted">loading...</p>
-      </header>
+      <header class="head">
+        <div class="brand">
+          <span class="logo" aria-hidden="true"></span>
+          <div class="brand-text">
+            <h1>Sionna RF Viewer</h1>
+            <p id="subtitle">loading...</p>
+          </div>
+          <button id="help-btn" class="icon-btn" title="What am I looking at?" aria-expanded="false">?</button>
+          <button id="collapse-btn" class="icon-btn" title="Hide the panel">&#x2039;</button>
+        </div>
 
-      <details id="help" open>
-        <summary>What am I looking at?</summary>
-        <ul class="help">
-          <li><span class="key tx"></span><b>Red dot</b>: the transmitter (TX). In <i>Moving TX</i> it drives along
-            the street and leaves a red trail.</li>
-          <li><span class="key rx"></span><b>White circles</b>: the receivers (phones at 1.5 m). Click one for its numbers.</li>
-          <li><span class="key carpet"></span><b>Coloured ground</b>: signal strength at 1.5 m height, using the legend
-            below (path gain in dB, or received power in dBm for realistic transmitters): yellow = strong,
-            green = medium, blue/purple = weak. No colour = no signal reached that spot (inside a building or in
-            deep shadow). With several sectors/beams it shows the best one at each spot.</li>
-          <li><span class="key lines"></span><b>Lines</b>: the routes the signal takes from the TX to a receiver
-            (ray paths). <b>Colour = which receiver</b> (see the swatches under "Ray paths"). <b>Solid and thick =
-            strong path, faint and thin = weak path.</b> A straight line is line of sight; a kinked line bounced off a
-            wall or bent around an edge. Click a line for its details.</li>
-          <li><span class="key bld"></span><b>Buildings</b>: what the simulation used (from OpenStreetMap), coloured by
-            material (glass, stone, metal, concrete; see the key under Layers). Make them more see-through with
-            "building opacity".</li>
-          <li><b>Chart</b> (Moving TX): total signal at each receiver over the 30 s drive; dots = line of sight.</li>
-        </ul>
-        <p class="muted small">Tips: <b>Top view</b> shows the coverage like a map. Drag = rotate, scroll = zoom,
-          right-drag = tilt.</p>
-      </details>
+        <select id="run" aria-label="Simulation run"></select>
+        <p id="run-desc" class="desc"></p>
 
-      <section>
-        <label for="run">Simulation run</label>
-        <select id="run"></select>
-        <p id="run-desc" class="muted"></p>
-      </section>
-
-      <section>
-        <div class="tabs" role="tablist">
+        <div class="seg mode" role="tablist" aria-label="Transmitter">
           <button id="tab-static" class="tab active" role="tab">Fixed TX</button>
           <button id="tab-mobility" class="tab" role="tab">Moving TX</button>
         </div>
-        <p id="mobility-hint" class="muted small" hidden>This run has no moving-transmitter simulation (only the
-          reference run <i>sg_raffles_place</i> has one). Choose it under "Simulation run" to get the timeline and
-          play button.</p>
-      </section>
+        <p id="mobility-hint" class="note" hidden>No moving transmitter in this run. Pick
+          <i>sg_raffles_place</i> for the timeline and play button.</p>
 
-      <section>
-        <span class="label">Band</span>
-        <div id="bands" class="segmented"></div>
-      </section>
+        <div id="bands" class="seg chips" aria-label="Band"></div>
 
-      <section>
-        <span class="label" id="rm-title">Radio map</span>
-        <div id="legend"></div>
-        <label class="row"><input type="checkbox" id="show-rm" checked /> show radio map</label>
-        <label class="row">opacity <input type="range" id="rm-alpha" min="0" max="1" step="0.05" value="0.85" /></label>
-      </section>
-
-      <section id="volume-section" hidden>
-        <span class="label">3-D coverage</span>
-        <div id="shell-toggles"></div>
-        <label class="row"><input type="checkbox" id="show-layer" /> signal at height</label>
-        <label class="row">height <input type="range" id="layer-h" min="0" max="0" step="1" value="0" />
-          <span id="layer-h-val" class="muted">1.5 m</span></label>
-        <p class="muted small">Shells are see-through 3-D shapes enclosing the outdoor air where the signal is at least
-          the given level (inside buildings excluded). "Signal at height" shows the coloured map floating at the chosen
-          height. Switch bands to compare the 3-D shapes. Tip: use 3D view and lower the building opacity.</p>
-      </section>
-
-      <section>
-        <span class="label">Ray paths per receiver</span>
-        <p class="muted small">Line colour = receiver; solid/thick = strong, faint/thin = weak.</p>
-        <div id="rx-toggles"></div>
-      </section>
-
-      <section id="mobility-section" hidden>
-        <span class="label">Total path gain vs time (moving TX)</span>
-        <canvas id="chart" width="600" height="240"></canvas>
-        <p class="muted small">Use the play button / timeline at the bottom. Dots = line of sight.</p>
-      </section>
-
-      <section id="metrics-section">
-        <span class="label">Link metrics</span>
-        <div id="metrics"></div>
-      </section>
-
-      <section>
-        <span class="label">Camera</span>
-        <div class="segmented">
-          <button id="view-top">Top view</button>
-          <button id="view-3d">3D view</button>
+        <div class="legend-block">
+          <span class="legend-title" id="rm-title">Radio map</span>
+          <div id="legend"></div>
         </div>
-      </section>
+      </header>
 
-      <section>
-        <span class="label">Layers</span>
-        <label class="row"><input type="checkbox" id="show-buildings" checked /> simulation buildings (OSM extrusion)</label>
-        <label class="row">building opacity <input type="range" id="bld-alpha" min="0.1" max="1" step="0.05" value="0.5" /></label>
-        <div id="materials" class="materials"></div>
-        <label class="row" id="osm-buildings-row" hidden><input type="checkbox" id="show-osm-buildings" /> Cesium OSM Buildings (ion)</label>
-        <label for="base">Base map</label>
-        <select id="base">
-          <option value="osm">OpenStreetMap tiles (online, no token)</option>
-          <option value="offline">Natural Earth (offline)</option>
-          <option value="ion">Cesium ion terrain + imagery (token)</option>
-        </select>
-      </section>
+      <nav class="ptabs" role="tablist">
+        <button class="ptab active" data-tab="signal">Signal</button>
+        <button class="ptab" data-tab="volume" id="ptab-volume">3-D</button>
+        <button class="ptab" data-tab="rx">Receivers</button>
+        <button class="ptab" data-tab="scene">Scene</button>
+      </nav>
 
-      <footer id="provenance" class="muted small"></footer>
+      <div class="body">
+        <!-- Signal -->
+        <div class="pane active" data-pane="signal">
+          <div class="card">
+            <label class="row switch"><input type="checkbox" id="show-rm" checked /> <span>Coverage map on the ground</span></label>
+            <label class="row">Opacity <input type="range" id="rm-alpha" min="0" max="1" step="0.05" value="0.85" /></label>
+          </div>
+          <div class="card" id="mobility-section" hidden>
+            <h3>Total path gain vs time</h3>
+            <canvas id="chart" width="600" height="240"></canvas>
+            <p class="note">Play with the controls at the bottom. Dots = line of sight.</p>
+          </div>
+          <div class="card" id="metrics-section">
+            <h3>Link metrics</h3>
+            <div id="metrics" class="table-wrap"></div>
+          </div>
+        </div>
+
+        <!-- 3-D coverage -->
+        <div class="pane" data-pane="volume">
+          <div id="volume-section" hidden>
+            <div class="card">
+              <label class="row switch"><input type="checkbox" id="dark-view" /> <span><b>Dark view</b>: only the signal is coloured</span></label>
+            </div>
+            <div class="card">
+              <h3>Coverage shells <span class="hint-icon" title="A shell is a see-through surface: inside it the signal is at least the given level (inside buildings too, where it passes through walls). It is only the boundary: if almost all the air is stronger than the level, there is no surface around the transmitters and you only see the weaker pockets far away. The % shows how much of the air is inside; hover a shell for details.">i</span></h3>
+              <div id="shell-toggles"></div>
+              <p id="shell-hint" class="shell-hint" hidden></p>
+            </div>
+            <div class="card">
+              <label class="row switch"><input type="checkbox" id="show-layer" /> <span>Signal at height</span></label>
+              <label class="row">Height <input type="range" id="layer-h" min="0" max="0" step="1" value="0" />
+                <span id="layer-h-val" class="val">1.5 m</span></label>
+              <p class="note">The coverage map floating at the chosen height (1.5–150 m).</p>
+            </div>
+          </div>
+          <p class="note empty" id="volume-empty">This run has no 3-D volume.</p>
+        </div>
+
+        <!-- Receivers / ray paths -->
+        <div class="pane" data-pane="rx">
+          <div class="card">
+            <h3>Ray paths per receiver</h3>
+            <p class="note">Line colour = receiver; solid and thick = strong, faint and thin = weak.</p>
+            <div id="rx-toggles"></div>
+          </div>
+        </div>
+
+        <!-- Scene -->
+        <div class="pane" data-pane="scene">
+          <div class="card">
+            <h3>Camera</h3>
+            <div class="seg">
+              <button id="view-top">Top view</button>
+              <button id="view-3d">3D view</button>
+            </div>
+          </div>
+          <div class="card">
+            <h3>Buildings</h3>
+            <label class="row switch"><input type="checkbox" id="show-buildings" checked /> <span>Simulation buildings (OSM)</span></label>
+            <label class="row">Opacity <input type="range" id="bld-alpha" min="0.1" max="1" step="0.05" value="0.5" /></label>
+            <div id="materials" class="materials"></div>
+            <label class="row switch" id="osm-buildings-row" hidden><input type="checkbox" id="show-osm-buildings" /> <span>Cesium OSM Buildings (ion)</span></label>
+          </div>
+          <div class="card">
+            <h3>Base map</h3>
+            <select id="base" aria-label="Base map">
+              <option value="osm">OpenStreetMap (online, no token)</option>
+              <option value="offline">Natural Earth (offline)</option>
+              <option value="ion">Cesium ion terrain + imagery (token)</option>
+            </select>
+          </div>
+          <footer id="provenance" class="note"></footer>
+        </div>
+      </div>
     </aside>
+
+    <button id="panel-open" class="icon-btn floating" title="Show the panel" hidden>&#x203a;</button>
+
+    <!-- Help card (opens beside the panel) -->
+    <div id="help" class="help-card" hidden>
+      <div class="help-head"><h2>What am I looking at?</h2><button id="help-close" class="icon-btn" title="Close">&times;</button></div>
+      <ul class="help">
+        <li><span class="key tx"></span><b>Red dot</b>: a transmitter site. In <i>Moving TX</i> it drives along the
+          street and leaves a red trail.</li>
+        <li><span class="key rx"></span><b>White circles</b>: receivers (phones at 1.5 m). Click one for its numbers.</li>
+        <li><span class="key carpet"></span><b>Coloured ground</b>: signal strength at 1.5 m (legend at the top):
+          yellow = strong, green = medium, blue/purple = weak, no colour = no signal reached that spot. With several
+          sectors or beams it shows the best one.</li>
+        <li><span class="key lines"></span><b>Lines</b>: the routes the signal takes to a receiver (ray paths).
+          Colour = which receiver; solid and thick = strong, faint and thin = weak. Straight = line of sight, kinked
+          = bounced off a wall or bent around an edge.</li>
+        <li><span class="key bld"></span><b>Buildings</b>: what the simulation used (OpenStreetMap), coloured by
+          material (key in the <i>Scene</i> tab).</li>
+        <li><span class="key shell"></span><b>Shells</b> (<i>3-D</i> tab): see-through surfaces enclosing the air
+          where the signal is at least a level. Only the boundary is drawn, so empty space inside means strong.</li>
+        <li><b>Chart</b> (Moving TX): total signal at each receiver over the drive; dots = line of sight.</li>
+      </ul>
+      <p class="note">Drag = rotate, scroll = zoom, right-drag = tilt. <b>Top view</b> (Scene tab) shows the
+        coverage like a map.</p>
+    </div>
+
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

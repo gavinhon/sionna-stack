@@ -81,6 +81,9 @@ export default defineConfig({
     host: "127.0.0.1", // WSL2 forwards localhost, so a Windows browser can open http://localhost:5180
     port: 5180,
     strictPort: true,
+    // Project on a Windows drive (/mnt/c/... in WSL): file-change events don't reach Linux there, so Vite would
+    // keep serving old code after an edit. Poll instead (only in that case; polling costs a little CPU).
+    watch: process.cwd().startsWith("/mnt/") ? { usePolling: true, interval: 500 } : undefined,
   },
   preview: { host: "127.0.0.1", port: 5180, strictPort: true },
 });

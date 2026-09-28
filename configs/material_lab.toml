@@ -1,0 +1,56 @@
+# MATERIAL LAB: the same single wall in six materials, close up, compared with no wall at all.
+# In the city every street mixes many buildings, materials and paths, so a material's own effect is hard to see.
+# Here one thing changes at a time: the wall's material.
+#
+#   uv run scripts/material_lab.py configs/material_lab.toml
+#
+# Geometry (local metres): a flat wall in the plane x = 0, 24 m wide (y = -12..12) and 15 m high, standing on the
+# same ground as the city scene. The transmitter is 10 m in front of it and 5 m off-centre, so the reflection
+# (bouncing back to the left, towards -x) and the shadow behind the wall (+x) land in different places.
+# The maps are at 1.5 m (phone height), 0.25 m cells.
+# Materials, thicknesses and scattering coefficients are exactly those of the Singapore scene
+# (scripts/make_osm_scene.py: MATERIAL_PROPS; ITU-R P.2040 permittivity/conductivity per band).
+
+receivers = []   # the lab uses the radio map only
+
+[experiment]
+name = "material_lab"
+description = "One wall, one material at a time: reflection, transmission and scattering close up"
+
+[scene]
+source = "scene.xml"   # placeholder: scripts/material_lab.py writes one small scene per material into the run folder
+
+[bands]
+ghz = [0.9, 3.5, 28.0]
+# 900 MHz is below the ITU-R P.2040 range of concrete, marble, brick and metal (>= 1 GHz): extrapolated and labelled
+extrapolate_materials = true
+
+[antennas]
+tx_pattern = "iso"
+rx_pattern = "iso"
+polarization = "V"
+
+[[transmitters]]
+name = "tx"
+position = [-10.0, -5.0, 6.0]
+power_dbm = 30.0
+
+[radio_map]
+center = [0.0, 0.0, 1.5]
+size = [50.0, 40.0]
+cell_size = [0.25, 0.25]
+samples_per_tx = 300_000_000
+max_depth = 6                 # one wall + ground: 6 interactions is plenty
+diffraction = true            # around the wall's edges
+edge_diffraction = true
+diffuse_reflection = true     # rough-surface scattering (scattering coefficient per material)
+refraction = true             # transmission through the wall
+seed = 42
+display_metric = "path_gain"
+vmin_db = -130.0
+vmax_db = -40.0
+
+[material_lab]
+materials = ["concrete", "brick", "marble", "wood", "glass", "metal"]
+wall_width = 24.0
+wall_height = 15.0

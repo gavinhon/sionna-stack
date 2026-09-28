@@ -25,6 +25,7 @@ Output layout (one directory per run; ``latest`` symlink points at the newest):
             radio_map_sionna.png    RadioMap.show()  (Sionna's 2-D map; first beam if several)
             scene_radio_map.png     Scene.render(radio_map=...) (3-D scene with coverage overlay)
             scene_paths.png         Scene.render(paths=...)
+                                    (these three are skipped for batched runs: many transmitters, see is_batched)
 """
 
 from __future__ import annotations
@@ -80,6 +81,7 @@ def build_scene(cfg: ExperimentConfig):
             tx.look_at(mi.Point3f(*aim))
     for r in cfg.receivers:
         scene.add(Receiver(name=r.name, position=mi.Point3f(*r.position), display_radius=3))
+    materials.attach_water_model(scene)  # no-op for scenes without water
     if cfg.extrapolate_materials:
         materials.enable_extrapolation(scene)
     return scene
@@ -169,10 +171,73 @@ def paths_to_numpy(paths) -> dict:
     }
 
 
-def serving_paths(p: dict, weights: list[np.ndarray], tx_power_dbm: list[float]) -> tuple[dict, np.ndarray, np.ndarray]:
+# GPU memory limits (RTX 5080, 16 GB), found on the 27-sector / 12-receiver Downtown Core run:
+TX_BATCH = 6     # transmitters per RadioMapSolver call (at most; see map_batch_size)
+PATH_LINKS = 12  # transmitter x receiver pairs per PathSolver call (depth 10, 3e6 samples): 72 pairs asked for 34 GB
+MAX_RAYS_PER_CALL = 2**32 - 1  # RadioMapSolver seeds its sampler with a 32-bit wavefront size (samples x TX)
+
+
+def map_batch_size(cfg: ExperimentConfig) -> int:
+    """Transmitters per RadioMapSolver call: <= TX_BATCH and samples_per_tx x n <= 2^32 - 1 (1e9 rays -> 4)."""
+    return max(1, min(TX_BATCH, MAX_RAYS_PER_CALL // max(1, cfg.radio_map.samples_per_tx)))
+
+
+def is_batched(cfg: ExperimentConfig) -> bool:
+    n_tx, n_rx = len(cfg.transmitters), len(cfg.receivers)
+    return n_tx > map_batch_size(cfg) or n_tx * n_rx > PATH_LINKS
+
+
+def tx_batches(scene, cfg: ExperimentConfig, size: int = TX_BATCH):
+    """Yield lists of transmitter indices (cfg order); during each step only those transmitters are in the scene.
+
+    Scenes that are not batched (is_batched) yield one batch and are not touched. Otherwise all transmitters are
+    removed and each batch of `size` is added in turn; afterwards all are re-added in config order, so solver
+    outputs keep their usual TX order."""
+    names = [t.name for t in cfg.transmitters]
+    if not is_batched(cfg):
+        yield list(range(len(names)))
+        return
+    objs = {n: scene.get(n) for n in names}
+    for n in names:
+        scene.remove(n)
+    try:
+        for s in range(0, len(names), size):
+            idx = list(range(s, min(s + size, len(names))))
+            for i in idx:
+                scene.add(objs[names[i]])
+            try:
+                yield idx
+            finally:
+                for i in idx:
+                    scene.remove(names[i])
+    finally:
+        for n in names:
+            scene.add(objs[n])
+
+
+def _pad_paths(parts: list[dict]) -> dict:
+    """Concatenate per-receiver serving paths (single TX axis) along the receiver axis, padding the path axis."""
+    P = max(p["valid"].shape[-1] for p in parts)
+
+    def pad(a, axis, fill):
+        w = [(0, 0)] * a.ndim
+        w[axis] = (0, P - a.shape[axis])
+        return np.pad(a, w, constant_values=fill)
+    return {
+        "a": np.concatenate([pad(p["a"], 4, 0) for p in parts], 0),
+        "tau": np.concatenate([pad(p["tau"], 2, 0) for p in parts], 0),
+        "valid": np.concatenate([pad(p["valid"], 2, False) for p in parts], 0),
+        "interactions": np.concatenate([pad(p["interactions"], 3, 0) for p in parts], 1),
+        "vertices": np.concatenate([pad(p["vertices"], 3, 0) for p in parts], 1),
+    }
+
+
+def serving_paths(p: dict, weights: list[np.ndarray], tx_power_dbm: list[float],
+                  return_power: bool = False):
     """Pick, per receiver, the (tx, beam) with the highest received power and return its paths.
 
-    Returns (paths dict with a single TX axis, serving_tx [rx], serving_beam [rx]).
+    Returns (paths dict with a single TX axis, serving_tx [rx], serving_beam [rx]) and, with return_power,
+    also the serving power [dBm] per receiver.
     """
     a = p["a"]                       # [rx, 1, tx, tx_ant, P, 1]
     valid = p["valid"].astype(bool)  # [rx, tx, P]
@@ -197,7 +262,26 @@ def serving_paths(p: dict, weights: list[np.ndarray], tx_power_dbm: list[float])
         "interactions": p["interactions"][:, rr, s_tx][:, :, None],                # [D, rx, 1, P]
         "vertices": p["vertices"][:, rr, s_tx][:, :, None],                        # [D, rx, 1, P, 3]
     }
-    return out, s_tx, s_b
+    return (out, s_tx, s_b, best) if return_power else (out, s_tx, s_b)
+
+
+def batched_serving_paths(scene, cfg: ExperimentConfig, weights, powers) -> tuple[dict, np.ndarray, np.ndarray]:
+    """serving_paths over all transmitters, solving a few transmitters at a time (same result, less memory)."""
+    best = None
+    for idx in tx_batches(scene, cfg, size=max(1, PATH_LINKS // max(1, len(cfg.receivers)))):
+        p_b = paths_to_numpy(compute_paths(scene, cfg))
+        out, s_tx, s_b, pw = serving_paths(p_b, weights, [powers[i] for i in idx], return_power=True)
+        del p_b
+        _release_gpu_cache()
+        rows = [{k: v[r:r + 1] if k in ("a", "tau", "valid") else v[:, r:r + 1] for k, v in out.items()}
+                for r in range(len(pw))]
+        if best is None:
+            best = {"pw": pw.copy(), "tx": np.array(idx)[s_tx], "beam": s_b.copy(), "rows": rows}
+            continue
+        for r in np.where(pw > best["pw"])[0]:
+            best["pw"][r], best["tx"][r], best["beam"][r] = pw[r], idx[s_tx[r]], s_b[r]
+            best["rows"][r] = rows[r]
+    return _pad_paths(best["rows"]), best["tx"], best["beam"]
 
 
 def radio_map_grid(rm) -> dict:
@@ -404,37 +488,44 @@ def run_band(scene, cfg: ExperimentConfig, ghz: float, band_dir: Path, render: b
     bw = band_bandwidth_hz(cfg, ghz)
 
     t0 = time.perf_counter()
-    paths = compute_paths(scene, cfg)
-    p_all = paths_to_numpy(paths)  # forces evaluation
-    p, s_tx, s_b = serving_paths(p_all, weights, powers)
-    del p_all
+    batched = is_batched(cfg)
+    if batched:
+        p, s_tx, s_b = batched_serving_paths(scene, cfg, weights, powers)
+        paths = None
+    else:
+        paths = compute_paths(scene, cfg)
+        p_all = paths_to_numpy(paths)  # forces evaluation
+        p, s_tx, s_b = serving_paths(p_all, weights, powers)
+        del p_all
     _release_gpu_cache()  # 1e9-ray radio maps need the memory; see _release_gpu_cache
     timings["paths_s"] = time.perf_counter() - t0
 
     t0 = time.perf_counter()
     best_pw, best_pg = None, None
     first_rm = None
-    for b, w in enumerate(weights):
-        rm = compute_radio_map(scene, cfg, w)
-        if first_rm is None:
-            first_rm = rm
-        pg = np.array(rm.path_gain)                                     # [tx, y, x]
-        with np.errstate(divide="ignore"):
-            pw = 10 * np.log10(pg) + np.asarray(powers)[:, None, None]  # received power per tx [dBm]
-        k = np.argmax(pw, axis=0)
-        pw_max = np.take_along_axis(pw, k[None], 0)[0]
-        pg_max = np.take_along_axis(pg, k[None], 0)[0]
-        if first_rm is not rm:
-            del rm
-        _release_gpu_cache()
-        if best_pw is None:
-            best_pw, best_pg, serv_tx, serv_b = pw_max, pg_max, k, np.zeros_like(k)
-        else:
-            better = pw_max > best_pw
-            best_pw = np.where(better, pw_max, best_pw)
-            best_pg = np.where(better, pg_max, best_pg)
-            serv_tx = np.where(better, k, serv_tx)
-            serv_b = np.where(better, b, serv_b)
+    for idx in tx_batches(scene, cfg, size=map_batch_size(cfg)):
+        for b, w in enumerate(weights):
+            rm = compute_radio_map(scene, cfg, w)
+            if first_rm is None:
+                first_rm = rm
+            pg = np.array(rm.path_gain)                                     # [tx in batch, y, x]
+            with np.errstate(divide="ignore"):
+                pw = 10 * np.log10(pg) + np.asarray([powers[i] for i in idx])[:, None, None]  # [dBm]
+            k = np.argmax(pw, axis=0)
+            pw_max = np.take_along_axis(pw, k[None], 0)[0]
+            pg_max = np.take_along_axis(pg, k[None], 0)[0]
+            k = np.asarray(idx)[k]                                          # batch index -> config index
+            if first_rm is not rm:
+                del rm
+            _release_gpu_cache()
+            if best_pw is None:
+                best_pw, best_pg, serv_tx, serv_b = pw_max, pg_max, k, np.zeros_like(k)
+            else:
+                better = pw_max > best_pw
+                best_pw = np.where(better, pw_max, best_pw)
+                best_pg = np.where(better, pg_max, best_pg)
+                serv_tx = np.where(better, k, serv_tx)
+                serv_b = np.where(better, b, serv_b)
     grid = radio_map_grid(first_rm)
     key = tuple(np.round(grid["cell_centers"][0, :2, :2].ravel(), 3)) + grid["cell_centers"].shape
     if outdoor_cache is not None and key in outdoor_cache:
@@ -457,7 +548,10 @@ def run_band(scene, cfg: ExperimentConfig, ghz: float, band_dir: Path, render: b
     np.savez_compressed(band_dir / "radio_map.npz", **m, frequency_hz=ghz * 1e9,
                         bandwidth_hz=bw if bw is not None else np.nan)
 
-    if render:
+    # Sionna's 3-D renders are skipped for batched runs (see is_batched): its radio-map figures can show
+    # one solver result (= one batch) only, and over a 2 km scene the path picture alone took ~9 min per band. The
+    # merged maps are in the comparison figures and in the viewer, which also draws the paths.
+    if render and not batched:
         t0 = time.perf_counter()
         # The path picture: Mitsuba builds a tube per path segment on the CPU, so thousands of depth-10 paths make
         # it slow and unreadable. Draw the dominant paths (<= RENDER_PATH_DEPTH interactions) from a separate,

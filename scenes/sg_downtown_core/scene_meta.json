@@ -1,0 +1,118 @@
+{
+  "name": "sg_downtown_core",
+  "generator": "scripts/make_osm_scene.py",
+  "generator_version": 2,
+  "created_utc": "2026-09-28T12:10:12+00:00",
+  "command": "scripts/make_osm_scene.py --name sg_downtown_core --lat 1.2851 --lon 103.8561 --size 2000",
+  "origin": {
+    "lat": 1.2851,
+    "lon": 103.8561,
+    "height": 0.0,
+    "frame": "ENU tangent plane at origin; x=east, y=north, z=up [m]",
+    "height_reference": "WGS84 ellipsoidal height of local z=0"
+  },
+  "size_m": 2000.0,
+  "ground_extent_m": 2200.0,
+  "volumes": {
+    "outlines": 899,
+    "parts": 623,
+    "outlines_replaced_by_parts": 95
+  },
+  "height_sources": {
+    "height_tag": 1238,
+    "levels": 170,
+    "default": 108,
+    "outline_levels": 5,
+    "outline_height_tag": 1
+  },
+  "height_stats_m": {
+    "min": 1.0,
+    "median": 15.0,
+    "max": 285.0
+  },
+  "wall_materials": {
+    "concrete": 1208,
+    "marble": 48,
+    "glass": 126,
+    "metal": 139,
+    "brick": 1
+  },
+  "roof_materials": {
+    "concrete": 1227,
+    "marble": 11,
+    "glass": 87,
+    "brick": 22,
+    "metal": 175
+  },
+  "material_sources": {
+    "from_osm_tag": 474,
+    "default": 1048,
+    "default_material": "concrete"
+  },
+  "material_props": {
+    "brick": {
+      "itu": "brick",
+      "thickness_m": 0.2,
+      "scattering_coefficient": 0.3
+    },
+    "concrete": {
+      "itu": "concrete",
+      "thickness_m": 0.3,
+      "scattering_coefficient": 0.3
+    },
+    "glass": {
+      "itu": "glass",
+      "thickness_m": 0.024,
+      "scattering_coefficient": 0.1
+    },
+    "marble": {
+      "itu": "marble",
+      "thickness_m": 0.3,
+      "scattering_coefficient": 0.3
+    },
+    "metal": {
+      "itu": "metal",
+      "thickness_m": 0.005,
+      "scattering_coefficient": 0.1
+    }
+  },
+  "ground": {
+    "itu": "concrete",
+    "thickness_m": 1.0,
+    "scattering_coefficient": 0.2
+  },
+  "water": {
+    "area_m2": 858238,
+    "model": "ITU-R P.840 liquid water (sionna_stack.materials)",
+    "mesh": "meshes/ground_water.ply"
+  },
+  "scattering_scale": 1.0,
+  "level_height_m": 3.2,
+  "default_height_m": 12.0,
+  "osm": {
+    "endpoint": "https://overpass-api.de/api/interpreter",
+    "fetched_utc": "2026-09-28T12:10:11+00:00",
+    "osm_base": "2026-09-28T12:07:11Z",
+    "query": "[out:json][timeout:180];(way[\"building\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);relation[\"building\"][\"type\"=\"multipolygon\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);way[\"building:part\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);way[\"natural\"=\"water\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);relation[\"natural\"=\"water\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);way[\"waterway\"=\"riverbank\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);relation[\"waterway\"=\"riverbank\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);way[\"landuse\"=\"reservoir\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);relation[\"landuse\"=\"reservoir\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);way[\"landuse\"=\"basin\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494);relation[\"landuse\"=\"basin\"](1.2760563348694833,103.84711457070507,1.294143632679739,103.86508542929494););out geom;",
+    "licence": "(c) OpenStreetMap contributors, ODbL 1.0"
+  },
+  "files": {
+    "scene": "scene.xml",
+    "meshes": [
+      "meshes/bld_brick.ply",
+      "meshes/bld_concrete.ply",
+      "meshes/bld_glass.ply",
+      "meshes/bld_marble.ply",
+      "meshes/bld_metal.ply",
+      "meshes/ground.ply",
+      "meshes/ground_water.ply"
+    ],
+    "osm_raw": "osm_raw.json"
+  },
+  "limitations": [
+    "flat roofs (prisms); roof shapes (skillion, pyramidal, ...) ignored",
+    "flat ground at z=0 (no terrain); OSM water areas (if any) are a separate surface with a water material, the rest of the ground is concrete",
+    "untagged materials use the default material",
+    "glass without metallic coatings; no windows/mullions/balconies; no vegetation, vehicles or people"
+  ]
+}

@@ -41,6 +41,7 @@ export async function record(state, index, which) {
     const rec = new Recorder(state, name);
     await state.api.setMode("static");
     await state.api.loadRun(entry.path);
+    state.api.setDark(false, false); // scenarios that want the dark view switch it on themselves
     resetLook(state);
     await KINDS[sc.kind](state, sc, rec);
     await rec.finish(sc);
@@ -80,22 +81,16 @@ const KINDS = {
 
   // coverage shell (middle level) per band while the camera turns
   async shells(state, sc, rec) {
-    $("show-rm").checked = false;
     const levels = state.exp.volume.shell_levels.slice().sort((a, c) => a - c);
     const lev = levels[Math.floor(levels.length / 2)];
     for (const l of levels) state.shellShow[l] = l === lev;
     const unit = state.exp.volume.metric.includes("dBm") ? "dBm" : "dB";
-    buildingAlpha(state, 0.12);
-    dimBaseMap(state, true); // translucent shells are hard to see on the bright street map
+    state.api.setDark(true, false); // the viewer's "dark view": only the signal is coloured
     const bands = state.exp.volume.bands;
     const total = bands.length * sc.perBand;
     let k = 0;
     for (const vb of bands) {
       await state.api.setBand(vb.slug);
-      Object.values(state.pathSources).forEach((ds) => (ds.show = false));
-      for (const m of state.shellModels) {
-        m.color = SHELL_COLOR; m.colorBlendMode = Cesium.ColorBlendMode.MIX; m.colorBlendAmount = 0.7;
-      }
       const label = state.exp.bands.find((b) => b.slug === vb.slug).label;
       for (let j = 0; j < sc.perBand; j++, k++) {
         look(state, 15 + (360 * k) / total, -32, 950);
@@ -104,9 +99,7 @@ const KINDS = {
           `3-D coverage shell: inside the surface the signal is stronger than ${lev} ${unit}`], sc.ms);
       }
     }
-    $("show-rm").checked = true;
-    dimBaseMap(state, false);
-    resetLook(state);
+    state.api.setDark(false, false);
   },
 
   // the signal map floating at every computed height, 1.5 m -> 150 m
@@ -163,16 +156,8 @@ function look(state, headingDeg, pitchDeg, range) {
   state.viewer.camera.lookAt(state.origin, new Cesium.HeadingPitchRange(rad(headingDeg), rad(pitchDeg), range));
 }
 
-const SHELL_COLOR = Cesium.Color.fromCssColorString("#35e0c8");
-
 function buildingAlpha(state, a) {
   if (state.model) state.model.color = Cesium.Color.WHITE.withAlpha(a);
-}
-
-function dimBaseMap(state, on) {
-  const base = state.viewer.imageryLayers.get(0);
-  base.brightness = on ? 0.3 : 1.0;
-  base.saturation = on ? 0.2 : 1.0;
 }
 
 function resetLook(state) {

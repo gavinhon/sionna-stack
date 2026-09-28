@@ -83,6 +83,19 @@ MATERIAL_PROPS = {
 }
 GROUND = ("concrete", 1.0, 0.20)  # roads/pavements; ITU "asphalt_concrete" is only valid 1-40 GHz
 
+# Water (rivers, Marina Bay): ITU-R P.2040 has no water material, so it is a generic radio material whose
+# permittivity/conductivity follow ITU-R P.840's model of liquid water at run time (sionna_stack.materials,
+# attached in experiment.build_scene). The values here are only the 3.5 GHz starting point. Calm water is nearly
+# a mirror: small scattering coefficient. Scenes without OSM water keep the single concrete ground plane.
+WATER_XML = """	<bsdf type="radio-material" id="rm_water">
+		<float name="relative_permittivity" value="75.0"/>
+		<float name="conductivity" value="2.2"/>
+		<float name="thickness" value="1.0"/>
+		<float name="scattering_coefficient" value="0.05"/>
+	</bsdf>
+"""
+WATER_TAGS = (("natural", "water"), ("waterway", "riverbank"), ("landuse", "reservoir"), ("landuse", "basin"))
+
 # Material ids deliberately do NOT start with "itu_": Sionna 2.1's XML pre-processing rewrites "itu_*" BSDFs
 # keeping only type/thickness/colour, which silently drops scattering_coefficient (checked in scene_utils.py).
 MATERIAL_XML = """	<bsdf type="itu-radio-material" id="{id}">
@@ -169,9 +182,11 @@ def fetch(lat, lon, size, endpoint) -> dict:
     frame = GeoFrame(lat, lon)
     r = frame.rectangle_degrees(-size / 2, -size / 2, size / 2, size / 2)
     bbox = f"{r['south']},{r['west']},{r['north']},{r['east']}"
-    query = (f"[out:json][timeout:120];("
+    water = "".join(f'way["{k}"="{v}"]({bbox});relation["{k}"="{v}"]({bbox});' for k, v in WATER_TAGS)
+    query = (f"[out:json][timeout:180];("
              f'way["building"]({bbox});relation["building"]["type"="multipolygon"]({bbox});'
              f'way["building:part"]({bbox});'
+             f"{water}"
              f");out geom;")
     # Public Overpass servers are often busy (HTTP 429/504): try each endpoint with a few retries.
     endpoints = [endpoint] + [e for e in OVERPASS_MIRRORS if e != endpoint]
@@ -198,6 +213,20 @@ def fetch(lat, lon, size, endpoint) -> dict:
     data["_endpoint"] = endpoint
     data["_fetched_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
     return data
+
+
+def flat_mesh(geom, z: float = 0.0):
+    """(Multi)Polygon -> upward-facing triangle mesh at height z (earcut triangulation)."""
+    parts = []
+    for g in (geom.geoms if hasattr(geom, "geoms") else [geom]):
+        if not isinstance(g, Polygon) or g.is_empty or g.area < 1.0:
+            continue
+        v2, f = trimesh.creation.triangulate_polygon(g, engine="earcut")
+        m = trimesh.Trimesh(vertices=np.column_stack([v2, np.full(len(v2), z)]), faces=f, process=False)
+        if (m.face_normals[:, 2] < 0).any():
+            m.invert()
+        parts.append(m)
+    return trimesh.util.concatenate(parts) if parts else None
 
 
 def extrude(poly: Polygon, z0: float, z1: float):
@@ -252,22 +281,26 @@ def main() -> int:
     frame = GeoFrame(lat, lon, 0.0)
     area = box(-size / 2, -size / 2, size / 2, size / 2)
 
-    outlines, parts = [], []
+    outlines, parts, waters = [], [], []
     for el in data["elements"]:
         t = el.get("tags", {})
         if "building" in t:
             outlines += [(p, t) for p in element_polygons(el, frame) if not p.is_empty and p.area >= 4.0]
         elif "building:part" in t:
             parts += [(p, t) for p in element_polygons(el, frame) if not p.is_empty and p.area >= 1.0]
+        elif any(t.get(k) == v for k, v in WATER_TAGS):
+            waters += [p for p in element_polygons(el, frame) if not p.is_empty]
 
-    # assign parts to the outline that contains them (Simple 3D Buildings)
+    # assign parts to the outline that contains them (Simple 3D Buildings): the first outline in data order,
+    # found through a spatial index (the plain double loop took minutes on 2 km scenes)
+    from shapely.strtree import STRtree
+    buffered = [op.buffer(0.5) for op, _ in outlines]
+    tree = STRtree(buffered)
     part_owner = [None] * len(parts)
     for pi, (pp, _) in enumerate(parts):
         rp = pp.representative_point()
-        for oi, (op, _) in enumerate(outlines):
-            if op.buffer(0.5).contains(rp):
-                part_owner[pi] = oi
-                break
+        hits = sorted(int(i) for i in tree.query(rp) if buffered[int(i)].contains(rp))
+        part_owner[pi] = hits[0] if hits else None
     outline_has_parts = Counter(o for o in part_owner if o is not None)
 
     buckets = defaultdict(list)          # itu material -> list of meshes
@@ -336,7 +369,17 @@ def main() -> int:
         mesh.export(out / "meshes" / f"bld_{m}.ply", encoding="binary")
         xml.append(SHAPE_XML.format(name=f"bld_{m}", mat=f"rm_{m}"))
     g = size / 2 + args.ground_margin
-    ground = trimesh.Trimesh(vertices=[[-g, -g, 0], [g, -g, 0], [g, g, 0], [-g, g, 0]], faces=[[0, 1, 2], [0, 2, 3]])
+    ground_sq = box(-g, -g, g, g)
+    water = unary_union(waters).intersection(ground_sq) if waters else None
+    water_area = float(water.area) if water is not None else 0.0
+    if water is None or water_area < 1.0:
+        ground = trimesh.Trimesh(vertices=[[-g, -g, 0], [g, -g, 0], [g, g, 0], [-g, g, 0]], faces=[[0, 1, 2], [0, 2, 3]])
+    else:
+        # land and water as separate surfaces (both at z = 0)
+        ground = flat_mesh(ground_sq.difference(water))
+        flat_mesh(water).export(out / "meshes" / "ground_water.ply", encoding="binary")
+        xml.insert(xml.index("\n"), WATER_XML)  # material definitions come before the shapes
+        xml.append(SHAPE_XML.format(name="ground_water", mat="rm_water"))
     ground.export(out / "meshes" / "ground.ply", encoding="binary")
     xml.append(SHAPE_XML.format(name="ground", mat="rm_ground"))
     xml.append("</scene>\n")
@@ -364,6 +407,8 @@ def main() -> int:
         "material_props": {m: {"itu": m, "thickness_m": MATERIAL_PROPS[m][0],
                                "scattering_coefficient": round(MATERIAL_PROPS[m][1] * scale, 4)} for m in mats_used},
         "ground": {"itu": gname, "thickness_m": gth, "scattering_coefficient": round(gs * scale, 4)},
+        "water": {"area_m2": round(water_area), "model": "ITU-R P.840 liquid water (sionna_stack.materials)",
+                  "mesh": "meshes/ground_water.ply"} if water_area >= 1.0 else None,
         "scattering_scale": scale,
         "level_height_m": LEVEL_HEIGHT,
         "default_height_m": args.default_height,
@@ -374,7 +419,8 @@ def main() -> int:
                   "osm_raw": "osm_raw.json"},
         "limitations": [
             "flat roofs (prisms); roof shapes (skillion, pyramidal, ...) ignored",
-            "flat ground at z=0 (no terrain); water surfaces modelled as ground (concrete)",
+            "flat ground at z=0 (no terrain); OSM water areas (if any) are a separate surface with a water "
+            "material, the rest of the ground is concrete",
             "untagged materials use the default material",
             "glass without metallic coatings; no windows/mullions/balconies; no vegetation, vehicles or people",
         ],
@@ -382,7 +428,8 @@ def main() -> int:
     (out / "scene_meta.json").write_text(json.dumps(meta, indent=2))
     print(f"Scene written to {out}/: {stats['outlines']} outlines + {stats['parts']} parts "
           f"({stats['outlines_replaced_by_parts']} outlines replaced by parts), heights {hs.min():.0f}-{hs.max():.0f} m; "
-          f"wall materials {meta['wall_materials']} ({meta['material_sources']['from_osm_tag']} from tags)")
+          f"wall materials {meta['wall_materials']} ({meta['material_sources']['from_osm_tag']} from tags)"
+          + (f"; water {water_area / 1e6:.2f} km²" if water_area >= 1.0 else ""))
     return 0
 
 

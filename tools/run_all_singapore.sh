@@ -11,7 +11,7 @@ log="logs/run_all_${stamp}.log"
 echo "log: $log"
 step() { echo "=== $(date +%T) $*" | tee -a "$log"; }
 
-for cfg in sg_raffles_place sg_macro sg_smallcell_mmwave; do
+for cfg in sg_raffles_place sg_macro sg_smallcell_mmwave sg_downtown_core; do
   step "experiment $cfg"
   uv run --frozen python -u scripts/run_experiment.py "configs/$cfg.toml" >> "$log" 2>&1 || { step "FAILED $cfg"; continue; }
   step "export $cfg"

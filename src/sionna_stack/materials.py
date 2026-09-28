@@ -44,6 +44,44 @@ def _nearest_params(itu_type: str, f_ghz: float):
     return p
 
 
+WATER_ID = "rm_water"   # generic radio material written by scripts/make_osm_scene.py for OSM water areas
+EPS0 = 8.8541878128e-12
+
+
+def water_permittivity(f_ghz, t_celsius: float = 29.0):
+    """Complex relative permittivity (eps', eps'') of liquid water, ITU-R P.840 (double Debye; valid to 1 THz).
+
+    Works on floats, numpy arrays and Dr.Jit arrays. 29 degC ~ Singapore surface water.
+    Examples at 29 degC: 0.9 GHz eps' 76.8, eps'' 3.0; 3.5 GHz 75.0 / 11.5; 28 GHz 31.4 / 34.4.
+    """
+    th = 300.0 / (273.15 + t_celsius) - 1.0
+    e0 = 77.66 + 103.3 * th
+    e1, e2 = 5.48, 3.51
+    fp = 20.09 - 142.0 * th + 294.0 * th * th     # primary relaxation [GHz]
+    fs = 590.0 - 1500.0 * th                      # secondary relaxation [GHz]
+    rp, rs = f_ghz / fp, f_ghz / fs
+    re = (e0 - e1) / (1 + rp * rp) + (e1 - e2) / (1 + rs * rs) + e2
+    im = f_ghz * (e0 - e1) / (fp * (1 + rp * rp)) + f_ghz * (e1 - e2) / (fs * (1 + rs * rs))
+    return re, im
+
+
+def attach_water_model(scene, t_celsius: float = 29.0, ionic_s_per_m: float = 0.01) -> bool:
+    """Give the scene's water material (if any) the ITU-R P.840 frequency dependence.
+
+    Sionna's RadioMaterial takes eps' and a conductivity sigma; the dielectric loss eps'' is converted with
+    sigma = 2 pi f eps0 eps'' and a small ionic conductivity of fresh water (Marina Reservoir is a freshwater
+    reservoir) is added. Returns True if a water material was found."""
+    found = False
+    for m in scene.radio_materials.values():
+        if m.name == WATER_ID:
+            def cb(f, t=t_celsius, ion=ionic_s_per_m):
+                re, im = water_permittivity(f / 1e9, t)
+                return re, 2 * 3.141592653589793 * f * EPS0 * im + ion
+            m.frequency_update_callback = cb
+            found = True
+    return found
+
+
 def enable_extrapolation(scene) -> None:
     for m in scene.radio_materials.values():
         if isinstance(m, ITURadioMaterial):

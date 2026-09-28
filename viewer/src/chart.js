@@ -1,7 +1,9 @@
 // Minimal line chart on a <canvas> (no charting library): total path gain vs time for each receiver,
 // dots where the receiver has line of sight, and a vertical cursor at the current timeline time.
 
-export const RX_COLORS = ["#4fb3ff", "#ffb14f", "#7ee07e", "#ff6b9a", "#c49bff", "#f5e663"];
+// 12 receiver colours (same list in scripts/export_geo.py); the wide-area run has 12 receivers
+export const RX_COLORS = ["#4fb3ff", "#ffb14f", "#7ee07e", "#ff6b9a", "#c49bff", "#f5e663",
+  "#46e0d0", "#ff8a5c", "#b8e05a", "#e07bd8", "#9aa7ff", "#ffd1a1"];
 
 export function drawChart(canvas, { times, series, los }, cursorTime, band) {
   const ctx = canvas.getContext("2d");

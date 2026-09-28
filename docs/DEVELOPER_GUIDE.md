@@ -33,6 +33,8 @@ common changes.
 22. [Sensitivity study and remaining uncertainty](#22-sensitivity-study-and-remaining-uncertainty)
 23. [3-D signal volume](#23-3-d-signal-volume-coverage-shells-height-slider)
 24. [Documentation GIFs (recording mode)](#24-documentation-gifs-recording-mode)
+25. [Material close-ups (material lab, city comparison)](#25-material-close-ups-material-lab-city-comparison)
+26. [Wide-area example: Downtown Core](#26-wide-area-example-downtown-core)
 
 Rebuilding the machine by hand: [REBUILD_FROM_ZERO.md](REBUILD_FROM_ZERO.md).
 
@@ -102,9 +104,12 @@ sionna-stack/
 │   ├── sg_raffles_place.toml   Singapore reference: omni TX, 10 bands, fixed + moving TX
 │   ├── sg_macro.toml           Singapore: 3-sector rooftop macro, 700 MHz - 7.5 GHz
 │   ├── sg_smallcell_mmwave.toml  Singapore: lamppost mmWave small cell, 8x8 array, 18 beams, 28/39/140 GHz
+│   ├── material_lab.toml       one wall, six materials, close up (§25)
+│   ├── sg_downtown_core.toml   wide area 2 km x 2 km: 9-site macro network, 12 landmark receivers (§26)
 │   └── gui_wsl.yaml            sionna-rt-gui override (§14)
 ├── scenes/sg_raffles_place/    generated scene + OSM snapshot (tracked in git: it is an input)
 ├── scenes/sg_raffles_place_{glass,specular,rough2}/   variants for the sensitivity study (§22)
+├── scenes/sg_downtown_core/    2 km x 2 km scene with water (§26)
 ├── scripts/
 │   ├── make_osm_scene.py  OSM -> Sionna scene (§15, v2: parts + materials §21)
 │   ├── convergence_study.py  rays / depth needed (§21)
@@ -114,6 +119,9 @@ sionna-stack/
 │   ├── export_geo.py      run -> viewer/public/data (§18)
 │   ├── run_volume.py      add the 3-D volume to an existing run; --figures-only (§23)
 │   ├── make_gifs.py       viewer recordings -> docs/img/viewer_*.gif (§24)
+│   ├── material_lab.py    single-wall material comparison (§25)
+│   ├── suggest_sites.py   macro sites on rooftops for any scene -> [[transmitters]] TOML (§26)
+│   ├── material_closeup_city.py  close-up difference maps from a sensitivity run (§25)
 │   ├── viewer.sh          CesiumJS viewer on 127.0.0.1:5180 (§19)
 │   ├── jupyter.sh         JupyterLab on 127.0.0.1:8890
 │   └── gui.sh             optional sionna-rt-gui in an isolated uvx env
@@ -355,6 +363,15 @@ range's coefficients, and the manifest records a warning per band. For real work
 **Phase 2 consequence:** OSM-derived scenes often have a ground plane; if it uses an ITU ground material,
 **28 GHz will fail**. Use `concrete` (or a custom material) for the ground there.
 
+**Water** (Marina Bay, rivers): ITU-R P.2040 has no water. `make_osm_scene.py` writes OSM water areas
+(`natural=water`, `waterway=riverbank`, `landuse=reservoir|basin`) as `meshes/ground_water.ply` with a generic
+`radio-material` `rm_water` (thickness 1 m, scattering 0.05: calm water is almost a mirror); the rest of the ground
+stays concrete. `experiment.build_scene` calls `materials.attach_water_model(scene)`, which gives `rm_water` a
+`frequency_update_callback` from **ITU-R P.840** (double-Debye model of liquid water, valid to 1 THz) at 29 °C,
+converting the loss term with σ = 2πf·ε0·ε″ and adding 0.01 S/m ionic conductivity (Marina Reservoir is fresh
+water). Values: 0.7 GHz ε′ 76.8, σ 0.10 S/m; 3.5 GHz ε′ 75.0, σ 2.26 S/m; 28 GHz ε′ 31.4, σ 53.7 S/m. Scenes
+without OSM water are unchanged (the Raffles Place scene rebuilds bit-identically from its snapshot).
+
 ## 11. Output contract (for the Phase 2 exporter)
 
 Treat this as a stable interface; bump it deliberately if you change it.
@@ -562,12 +579,26 @@ Input: a run directory with `manifest.json["geo_origin"]` (otherwise it exits wi
   `application/json`).
 * **Server:** `host 127.0.0.1`, `port 5180`, `strictPort`. WSL2 localhost forwarding makes it reachable from
   Windows (verified).
+* **Project on a Windows drive:** when the viewer runs from `/mnt/c/...` (e.g. the Windows copy
+  `C:\Projects\sionna-stack` started from Ubuntu), file-change events from the Windows side don't reach Linux, so
+  Vite kept serving the old `main.js` after an edit (observed). `server.watch.usePolling` is switched on
+  automatically when the working directory starts with `/mnt/`.
 * **Live data (`liveDataPlugin` in `vite.config.js`):** `/data/*` is served straight from `public/data` on
   every request (`Cache-Control: no-store`). Without it, Vite's dev server answers files that were exported *after*
   it started (or re-exported: the exporter replaces the run folder) with `index.html`, and the viewer shows
   `Unexpected token '<', "<!doctype "... is not valid JSON`. Verified by re-exporting while the server runs.
 * **Defaults for readability:** building opacity 0.5; 3D camera pitch −58°, range 1150 m, so 280 m towers don't
-  hide the streets; an in-panel "What am I looking at?" legend (`<details id="help">`).
+  hide the streets.
+* **Panel layout** (`index.html`, `style.css`, `main.js`: `setupPanel`, `showPane`, `syncVolumeTab`): a 360 px
+  panel on the **left** (Cesium's info box opens top-right). Fixed header with run, mode, band chips and legend;
+  tabs Signal / 3-D / Receivers / Scene (`.ptab[data-tab]` ↔ `.pane[data-pane]`, last tab remembered in
+  `localStorage`, `?dark=1` opens 3-D); the 3-D tab is disabled when `#volume-section` is hidden (no volume, or
+  Moving TX). Help is a card beside the panel (`#help-btn`); `#collapse-btn` / `#panel-open` hide and show the
+  panel (`body.panel-hidden`). Cesium's animation and timeline widgets are moved right of the panel, credits
+  bottom-right. The Cesium logo is hidden (`.cesium-credit-logoContainer`) unless the ion base map is used
+  (`body.base-ion`: ion's terms require its logo); data credits stay visible (OSM licence). `[hidden]` is forced to
+  `display: none !important` because the flex rules would otherwise show hidden rows. All control IDs are
+  unchanged, so `record.js` works as before.
 * **Base maps:** `ion` (token: `ImageryLayer.fromWorldImagery()`, `createWorldTerrainAsync()`, optional
   `createOsmBuildingsAsync()`), `osm` (`OpenStreetMapImageryProvider`, `https://tile.openstreetmap.org/`),
   `offline` (`TileMapServiceImageryProvider.fromUrl(buildModuleUrl("Assets/Textures/NaturalEarthII"))`). The
@@ -692,7 +723,8 @@ properties, so gradient-based calibration is possible).
 * Radio-map statistics are over **outdoor** cells (`layout.outdoor_mask` on the cell centres) — a 1.5 m plane cuts
   through building interiors, which previously counted as "not covered".
 * `band_label(0.7)` → "700 MHz"; `band_slug(0.7)` → "0p7GHz".
-* `tools/run_all_singapore.sh` (all three experiments + exports + sensitivity, log in `logs/`) and
+* `tools/run_all_singapore.sh` (the three Raffles Place experiments and the Downtown Core network + exports +
+  sensitivity, log in `logs/`) and
   `tools/run_all_volumes.sh` (§23). `tools/follow_log.sh` follows the newest log (steps, timings and errors
   only), `tools/show_log.sh [name-pattern]` prints the same lines once, and `tools/wait_for.sh "<pattern>"` waits
   until no process matches (it ignores its own parent shells, whose command lines contain the pattern too).
@@ -739,6 +771,31 @@ the same ENU model matrix as the buildings (+ ground offset); a `volumeToken` di
 loads when bands are switched quickly. The height layer is a `rectangle` entity with an `ImageMaterialProperty`
 at `height = h + origin height + ground offset`. Volume controls are hidden in Moving-TX mode.
 
+**Dark view** (`#dark-view`, `?dark=1`; `main.js`: `setDark`, `applyDark`, `darkActive`, `styleShell`,
+`styleBuildings`): base imagery layer `brightness 0.3`, `saturation 0.2`; building model `#c8ced6`, α 0.12,
+`colorBlendAmount 1` (MIX: replaces the material colours); shells `#35e0c8`, MIX 0.7 (default: WHITE, HIGHLIGHT);
+ground radio map and path data sources hidden in `showStaticLayers`; camera preset `"dark"` (pitch −32°, range
+950 m). Active only in Fixed-TX mode on runs with a volume (`darkActive()`); `setMode` calls `applyDark()`, so
+Moving TX gets the normal look and switching back re-applies it. The recorder's `shells` scenario calls the same
+`setDark`, so the viewer and the GIFs look the same.
+
+**Explaining the shells** (a shell is only an iso-surface, so a level exceeded almost everywhere shows no surface
+near the transmitters and only wraps weak pockets far away, which users read as "the signal is only far away"):
+* `volume.shell_stats(values, reached, indoor, xs, ys, levels, tx_xy)` → per level `pct_inside` (share of the
+  outdoor air cells, all heights, at or above the level; unreached cells count as below) and the median horizontal
+  distance to the nearest transmitter of the air inside / outside (`dist_inside_m`, `dist_outside_m`).
+  Computed on the unsmoothed values (the surfaces use σ ≈ 1 cell of smoothing, so they can differ slightly).
+* `export_geo.export_volume` stores these on every shell in `export.json` (`volume.bands[].shells[]`), including
+  levels without a surface at that band (`glb: null`, skipped by `showVolume`).
+* Viewer (`shellExplanation`, `updateShellHints`, called from `showVolume` on every band/level change): each shell
+  row shows "(p % of the air inside)", its `title` (hover) carries a sentence chosen by p (≥ 85 %: "almost
+  everything is inside … the surfaces wrap the weaker pockets, typically d_out m from the nearest transmitter";
+  ≤ 15 %: "a small bubble around the transmitters"; otherwise "the edge of coverage"; 0 % with inside cells: "a
+  tiny speck at the antenna"), and `#shell-hint` shows the sentences for the ticked levels.
+* `volume.levels_figure` → `volume_shell_levels.png` per run (made by `run_volumes` and `redraw_figures`): the
+  vertical cut with each level's contour (same smoothing as the shells, solid lines) and its `pct_inside`. Many-band
+  runs use two columns. Docs: User Guide §12.6 ("Why is there sometimes nothing around the transmitter").
+
 ## 24. Documentation GIFs (recording mode)
 
 The GIFs in `docs/img/viewer_*.gif` are recorded from the viewer itself, so they always show the current results
@@ -755,7 +812,7 @@ uv run scripts/make_gifs.py                 # 3. outputs/captures/<scenario>/ ->
 |---|---|---|---|
 | `overview` | reference | camera orbit, 3.5 GHz ground map + ray paths | 48 |
 | `bands` / `macro_bands` | reference / macro | fixed camera, one frame per band | 10 / 7 |
-| `shells` / `smallcell_shells` | reference / small cell | middle shell level per band, orbiting camera, dimmed base map | 60 / 42 |
+| `shells` / `smallcell_shells` | reference / small cell | middle shell level per band, orbiting camera, dark view | 60 / 42 |
 | `height` | reference | height layer 1.5 → 150 m, 3.5 GHz | 31 |
 | `moving` | reference | Moving-TX mode, one frame per simulated step, 3.5 GHz | 60 |
 
@@ -783,3 +840,79 @@ changes each frame). GitHub renders GIFs inline from the repository. Every regen
 the git history, so regenerate them only when the results change meaningfully. `--frames-step 2` (half the
 frames, same duration) or `--scale 0.8` make them smaller. Map tiles are © OpenStreetMap contributors (credit
 drawn into every frame).
+
+## 25. Material close-ups (material lab, city comparison)
+
+**Material lab** (`scripts/material_lab.py`, `configs/material_lab.toml`, ≈ 20 s on the RTX 5080):
+* For "none" and each material the script writes a tiny scene into `<run>/scenes/<case>/`: the city's ground
+  (`GROUND`) plus **one flat surface** at x = 0, 24 m × 15 m. The material XML, thickness and scattering
+  coefficient come from `make_osm_scene.py` (`MATERIAL_PROPS`, `MATERIAL_XML`, `SHAPE_XML`, imported), so the lab
+  uses exactly the city's materials. A single surface = one wall of the material's thickness in Sionna's thin-slab
+  model; a closed box would be crossed twice.
+* Scenes go through `experiment.build_scene` / `set_band` / `compute_radio_map` with the config's
+  `[radio_map]` settings (0.25 m cells, 3e8 rays, depth 6, diffraction + edge diffraction, diffuse, refraction).
+  Cells without rays are set to `FLOOR_DB = −160` so differences stay finite; a table value is marked "≤" when
+  more than half of the shadow zone sits at the floor.
+* Zones: **behind** = cells whose straight line to the TX crosses the wall ≥ 2 m inside its edges (geometric
+  shadow); **front** = cells the mirror image of the TX reaches through the wall (specular zone), > 3 m from the
+  TX. Reported: median difference to "none" in each zone (`material_lab.csv/.md`).
+* Figures: `material_lab_maps.png` (absolute), `material_lab_effect.png` (difference, `RdBu_r` with
+  `TwoSlopeNorm(−40, 0, +6)`: a reflection adds ≤ 3 dB where the TX is in view, and a symmetric scale hid it),
+  `material_lab_profile.png` (row through the TX), `material_lab_effect.gif` (one material per frame).
+* Results (run 20260928-194548) are in User Guide §12.7. Sanity check against ITU-R P.2040 by hand: concrete
+  (ε′ = 5.24, σ = 0.0462·f^0.7822) at 3.5 GHz gives α ≈ 88 dB/m → 26 dB for 30 cm; simulated −26.6 dB. Metal:
+  nothing is transmitted; the −26…−40 dB behind it is edge/top diffraction, which is also the floor concrete
+  reaches at 28 GHz.
+
+**City close-up** (`scripts/material_closeup_city.py <sensitivity run>`): no simulation; reads the per-variant
+`radio_map.npz` of a sensitivity run and draws `closeup_materials.png` (baseline vs `untagged_glass`) and
+`closeup_roughness.png` (`specular` vs `rough_x2`), 200 m window (`--window`), indoor cells grey. Buildings that
+changed material are found by comparing roof triangles (normal z > 0.9) of `bld_glass.ply` in the baseline and
+the glass-variant scene (centroids rounded to 0.1 m) and filled in cyan.
+
+## 26. Wide-area example: Downtown Core
+
+`configs/sg_downtown_core.toml`, scene `scenes/sg_downtown_core` (origin 1.2851 N, 103.8561 E, 2 km × 2 km,
+Boat Quay / Padang → Marina Bay Sands / Gardens by the Bay). Same pipeline as the Raffles Place studies; what is
+different:
+
+* **Scene:** `make_osm_scene.py --size 2000` → 899 outlines + 623 parts (95 outlines replaced), heights up to
+  285 m, 0.86 km² of water (Marina Bay, Singapore River, part of the Kallang Basin) as a separate surface with
+  the ITU-R P.840 water model (§10). The part → outline assignment uses a shapely `STRtree` (first containing
+  outline in data order, identical to the old double loop, which took minutes at this size).
+* **Transmitters:** `scripts/suggest_sites.py <scene> --isd 500` → hexagonal nominal grid, nearest flat roof
+  25–100 m within 0.4·ISD, sites ≥ 0.5·ISD apart; 9 sites × 3 sectors (30/150/270°), each sector at the roof edge
+  it faces (1.5 m inside, 3 m mast), downtilt = atan((h − 1.5)/(ISD/2)) + 2°, clamped 3–12°; 4 × 1 TR 38.901
+  panel, 46 dBm. First version put all sectors at the roof centroid: on a 4,600 m² roof the roof itself hid the
+  street 70 m away (−96 dBm), so the edge mounting is essential. Sector names `sNN_k`; `export_geo.devices`
+  groups them into one site marker by the prefix (mean position).
+* **Receivers:** 12 landmarks by OSM `name` (Overpass), moved to the nearest point that is outdoors with 2 m
+  clearance from walls and ≥ 3 m from water (the water taxi ≥ 10 m from the shore); all moved ≤ 7 m.
+* **Batching (`experiment.is_batched`, `tx_batches`):** 27 sectors × 12 receivers didn't fit in 16 GB. The
+  PathSolver asked for 34 GB with 6 × 12 pairs, so paths are solved with ≤ `PATH_LINKS` = 12 TX×RX pairs per call
+  (here one sector at a time), and radio maps with `map_batch_size` sectors per call: at most `TX_BATCH` = 6
+  and at most 2³² − 1 rays per call, because `RadioMapSolver` seeds its sampler with a 32-bit wavefront size
+  (6 × 1e9 rays failed with `seed(): incompatible function arguments`; at 1e9 rays per sector: 4 per call; the
+  Raffles macro's 3 × 1e9 fits). Transmitters are removed from
+  / re-added to the scene per batch (same `Transmitter` objects, config order restored afterwards); serving
+  sector per receiver (`batched_serving_paths`, paths padded to a common length) and per map cell are the maxima
+  over batches, so results equal an unbatched solve. Runs with ≤ 6 transmitters and ≤ 12 pairs (all Raffles
+  studies) take the unbatched code path unchanged. Sionna's 3-D renders (`scene_radio_map.png`,
+  `radio_map_sionna.png`, `scene_paths.png`) are skipped for batched runs: its radio-map figures show one solver
+  result (one batch), and the path render took ~9 min per band over 2 km.
+* **Viewer:** camera distances scale with the run's map width / 500 m (`sceneScale()`: ×4 here, ×1 for Raffles
+  Place); 12 receiver colours (`RX_COLORS` in `chart.js` and `export_geo.py`).
+* **Statistics:** "outdoor area" includes the water surface (boats, promenades over water), which is well
+  covered from the waterfront sites.
+* **Runtime** (run 20260928-203459, RTX 5080): 462 s for 3 bands; per band ≈ 57–80 s paths (27 single-sector
+  PathSolver calls) + ≈ 81–89 s radio maps (7 calls of ≤ 4 sectors × 1e9 rays, 1,000 × 1,000 cells). Export
+  6.8 MB. Colour scale −110…−20 dBm (as `sg_macro`): with −30 dBm as the top, 700 MHz was saturated.
+* **3-D volume** (`[volume]`, added with `run_volume.py`): 31 heights × 250 × 250 cells of **8 m**, 3e8 rays per
+  sector (more rays per cell than the 4 m Raffles volumes), ≈ 150 s per band. `volume.compute_volume` uses the
+  same `tx_batches` (≤ 2³² rays per call → 6 sectors per call here). Shell levels −45 / −35 / −25 dBm: the
+  network is strong everywhere (p5–p95: 700 MHz −37…−18, 3.5 GHz −51…−32 dBm), so the first guess
+  −80 / −65 / −50 would have traced only weak pockets. `slice_y = 0` (new `VolumeCfg` field) puts the
+  vertical-cut figure through the middle instead of through the first transmitter (a corner site); the cut marks
+  only transmitters within 50 m of it. The static shell figure stretches height to ≥ ¼ of the width for wide
+  scenes (×3.3 here, noted in its title). Shells up to ≈ 300k triangles per level; export 38 MB (vs 6.8 MB without
+  the volume). Dark view and height slider verified in the viewer.

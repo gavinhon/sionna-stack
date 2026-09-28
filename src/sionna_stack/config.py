@@ -129,6 +129,7 @@ class VolumeCfg:
     bands_ghz: list[float] | None = None    # default: all bands of the experiment
     # Shell levels in the display metric's unit (dB path gain or dBm received power), strongest last
     shell_levels: list[float] = field(default_factory=lambda: [-120.0, -100.0, -80.0])
+    slice_y: float | None = None            # y [m] of the vertical-cut figure (default: first transmitter's y)
 
     def height_list(self) -> list[float]:
         if self.heights:

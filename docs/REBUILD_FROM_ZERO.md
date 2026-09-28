@@ -342,8 +342,9 @@ bash scripts/viewer.sh
 Open `http://localhost:5180` in your Windows browser. Every new run you export appears in the "Simulation
 run" list after reloading the page.
 
-**Everything for Singapore in one go** (reference sweep over 10 bands, rooftop macro, mmWave small cell,
-sensitivity study; about an hour; each run is exported for the viewer automatically):
+**Everything for Singapore in one go** (reference sweep over 10 bands, rooftop macro, mmWave small cell, the
+2 km Downtown Core network, sensitivity study; about 1 h 20 min; each run is exported for the viewer
+automatically):
 
 ```bash
 bash tools/run_all_singapore.sh
